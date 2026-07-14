@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../Downloads/education_satisfaction_report_mvp_v1_2_orange_ui/education_satisfaction_report_mvp/src"
+		},
+		{
+			"path": "../../Downloads/education_satisfaction_report_mvp_v1_2_orange_ui/education_satisfaction_report_mvp/tests"
+		},
+		{
+			"path": "../../Downloads/education_satisfaction_report_mvp_v1_2_orange_ui/education_satisfaction_report_mvp/docs"
+		},
+		{
+			"path": "../../Downloads/education_satisfaction_report_mvp_v1_2_orange_ui/education_satisfaction_report_mvp/assets"
+		},
+		{
+			"path": "../../Downloads/education_satisfaction_report_mvp_v1_2_orange_ui/education_satisfaction_report_mvp/sample_data"
+		}
+	],
+	"settings": {}
+}
