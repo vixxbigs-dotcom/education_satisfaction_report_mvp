@@ -1,117 +1,309 @@
-# 교육만족도 결과보고서 생성기 — v1.4
+# 📊 교육만족도 결과보고서 생성기 (Beta)
 
-통일되지 않은 설문 엑셀을 업로드하면 설문 구조를 자동 분석하고, 장표별 입력값을 수정한 뒤 편집 가능한 16:9 PPTX를 생성하는 Streamlit 웹앱입니다.
+엑셀 설문 데이터를 분석해  
+교육 결과보고서 PPT를 자동으로 생성하는 Streamlit 웹앱입니다.
 
-## 현재 구현 범위
+---
 
-- 문항이 **열 / 응답자가 행**인 일반 로우데이터 지원
-- 문항이 **행 / 응답자가 열**인 전치형 로우데이터 지원
-- 여러 시트 중 설문 응답 시트 자동 선택
-- 숫자형 1~5점 및 문자형 리커트 응답 자동 변환
-- 교육명·일정·차수·회사명·강사명 자동 추출
-- 객관식 평균·응답 분포 자동 계산
-- 주관식 좋았던 점·아쉬웠던 점 자동 분류
-- 장표별 좌측 수정 / 우측 HTML 실시간 미리보기
-- 커리큘럼 직접 추가·수정
-- 현장 사진 다중 업로드
-- 텍스트·표·도형·그래프가 편집 가능한 16:9 PPTX 생성
-- 멀티캠퍼스 주황색 결과보고서 UI 적용
-- 표지·목차·구분장·감사 장표에 표준 배경 적용
-- 설문 구성과 만족도 요약 장표 자동 분할 및 전체 페이지 미리보기
+## ✨ 주요 기능
 
-## 실행 방법
+- 📁 엑셀 파일 업로드
+- 🔍 설문 문항 자동 추출
+- 📈 객관식 평균 및 응답 분포 계산
+- 💬 주관식 답변 자동 정리
+- ✏️ 추출 결과 실시간 수정
+- 👀 16:9 PPT 미리보기
+- 🖼️ 현장 사진 슬라이드 생성
+- 📥 편집 가능한 PPTX 다운로드
 
-### Windows에서 가장 쉬운 방법
+---
 
-프로젝트 폴더에서 `run.bat`을 더블클릭합니다.
+## 🧩 지원하는 엑셀 구조
 
-### Git Bash 또는 PowerShell
+다음 형식을 지원합니다.
 
-```bash
-cd education_satisfaction_report_mvp
-py -m venv .venv
-source .venv/Scripts/activate   # Git Bash
-# PowerShell은: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-streamlit run app.py
+- 문항이 열로 배치된 설문
+- 문항이 행으로 배치된 설문
+- 숫자형 1~5점 응답
+- 문자형 5점 척도 응답
+- 여러 시트가 포함된 엑셀
+- 객관식과 주관식이 함께 있는 설문
+
+예시 척도:
+
+```text
+매우 그렇다
+그렇다
+보통이다
+그렇지 않다
+매우 그렇지 않다
 ```
 
-브라우저에서 보통 `http://localhost:8501`이 열립니다.
+---
 
-## 폴더 구조
+## 🗂️ 프로젝트 구조
 
 ```text
 education_satisfaction_report_mvp/
-├─ app.py                         # Streamlit 화면 및 상태 관리
+├─ app.py
 ├─ requirements.txt
-├─ run.bat
-├─ run.sh
+├─ README.md
+│
 ├─ assets/
-│  ├─ 결과보고서_표준양식_참고용.pptx
+│  ├─ multicampus_logo.png
 │  ├─ multicampus_section_background.png
-│  └─ multicampus_logo.png
+│  └─ 결과보고서_표준양식_참고용.pptx
+│
 ├─ src/
-│  ├─ models.py                   # 표준 데이터 모델
-│  ├─ excel_parser.py             # 비정형 엑셀 구조 분석
-│  ├─ slide_plan.py               # 동적 장표 목록 생성
-│  ├─ preview_renderer.py         # 주황색 HTML 16:9 미리보기
-│  ├─ ppt_renderer.py             # 편집 가능한 PPTX 생성
-│  ├─ live_input.py               # 자동 반영 입력 컴포넌트
-│  └─ live_input_frontend/        # 로컬 프런트엔드
-├─ docs/
-│  ├─ DIRECTORY_STRUCTURE.md
-│  └─ NEXT_PHASE.md
-└─ tests/
-   └─ smoke_test.py
+│  ├─ __init__.py
+│  ├─ excel_parser.py
+│  ├─ models.py
+│  ├─ slide_plan.py
+│  ├─ preview_renderer.py
+│  ├─ ppt_renderer.py
+│  ├─ text_utils.py
+│  └─ live_input.py
+│
+└─ docs/
+   └─ 변경 이력 문서
 ```
 
-## 사용 흐름
+---
 
-1. 설문 엑셀 업로드
-2. 자동 추출 결과 확인
-3. 이전/다음 또는 장표 바로가기로 이동
-4. 왼쪽 입력값 수정
-5. 오른쪽 미리보기 확인
-6. `PPT 생성 / 최신 내용 반영`
-7. `PPT 다운로드`
+## 🚀 처음 실행하기
 
-## 현재 MVP의 한계
+### 1. 프로젝트 폴더 열기
 
-- HTML 미리보기와 PPT는 동일한 데이터와 장표 계획을 사용합니다. 브라우저와 PowerPoint의 글꼴 렌더링 차이로 세부 줄바꿈은 달라질 수 있습니다.
-- 표지·목차·구분장·감사 장표는 제공된 배경 이미지를 사용하며, 일반 장표는 동일한 주황색 UI를 코드로 구성합니다.
-- 커리큘럼, 교육방식, 교육대상, 교육목표 등 엑셀에 없는 정보는 공란으로 시작합니다.
-- 주관식 응답의 의미 기반 요약·키워드 분석은 아직 포함하지 않았습니다.
-- 슬라이드 포함/제외, 순서 변경, 로고·테마 컬러 변경은 다음 단계 대상입니다.
-
-## 개발 원칙
-
-엑셀 → PPT를 직접 연결하지 않고 다음 구조를 사용합니다.
+VSCode에서 프로젝트 폴더를 엽니다.
 
 ```text
-엑셀 분석
-  ↓
-표준 ReportData
-  ├─ HTML 미리보기
-  └─ PPTX 생성
+education_satisfaction_report_mvp
 ```
 
-이 구조를 유지하면 미리보기와 PPT의 데이터 불일치를 줄이고, 이후 템플릿 변경도 비교적 쉽게 반영할 수 있습니다.
+### 2. 가상환경 생성
 
-## 2026-07 수정 반영
+```bash
+py -m venv .venv
+```
 
-- 설문 원본 문항 앞의 `1.`, `2)` 같은 번호를 제거한 뒤 보고서에서 연속 번호를 새로 부여합니다.
-- 주관식 결과는 구분선 목록이 아니라 `- 응답 내용` 형식으로 출력합니다.
-- 텍스트 입력은 프로젝트에 포함된 로컬 실시간 입력 컴포넌트로 처리합니다. 별도 로그인이나 외부 CDN이 필요하지 않으며, 타이핑을 잠시 멈추면 미리보기가 자동 갱신됩니다.
-- 입력값 변경으로 앱이 다시 렌더링되어도 현재 보고 있던 슬라이드 ID를 유지합니다.
+`py`가 안 되면 아래 명령을 사용합니다.
 
+```bash
+python -m venv .venv
+```
 
-## v1.4 UI 업데이트
+### 3. 가상환경 활성화
 
-- 표지 과정명에서 대괄호를 제거했습니다.
-- 현재 장표에 실제 반영되는 입력 항목만 표시합니다. 고정 장표에서는 입력 패널을 숨기고 미리보기를 넓게 표시합니다.
-- 객관식 문항 제목은 길이에 따라 자동 축소되어 겹침을 방지합니다.
-- 응답 수가 0인 항목은 미리보기와 PPT에서 색상 막대를 생성하지 않습니다.
-- 흰 배경 장표 우측 하단에 사용자가 제공한 멀티캠퍼스 공식 로고를 적용했습니다.
-- 표와 본문 등 기본 글자 크기를 전반적으로 확대했습니다.
+#### Git Bash
 
-상세 변경 사항은 `docs/CHANGELOG_V1_4.md`를 확인하세요.
+```bash
+source .venv/Scripts/activate
+```
+
+#### PowerShell
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+PowerShell 실행 정책 오류가 나오면:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+그다음 다시 활성화합니다.
+
+### 4. 패키지 설치
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+### 5. 앱 실행
+
+```bash
+python -m streamlit run app.py
+```
+
+브라우저 주소:
+
+```text
+http://localhost:8501
+```
+
+---
+
+## 🔁 다음 실행부터
+
+가상환경을 새로 만들 필요는 없습니다.
+
+### Git Bash
+
+```bash
+source .venv/Scripts/activate
+python -m streamlit run app.py
+```
+
+### PowerShell
+
+```powershell
+.venv\Scripts\Activate.ps1
+python -m streamlit run app.py
+```
+
+---
+
+## 📝 사용 방법
+
+1. 엑셀 파일을 업로드합니다.
+2. 자동 추출 결과를 확인합니다.
+3. 필요한 내용을 수정합니다.
+4. 슬라이드 미리보기를 확인합니다.
+5. PPT 생성 버튼을 누릅니다.
+6. 완성된 PPTX를 다운로드합니다.
+
+---
+
+## 🧾 자동 추출 항목
+
+- 과정명
+- 교육일정
+- 교육방식
+- 교육대상
+- 교육목표
+- 강사명
+- 응답자 수
+- 객관식 문항
+- 주관식 문항
+- 문항별 평균
+- 응답 분포
+
+엑셀에서 찾지 못한 값은 공란으로 표시됩니다.
+
+---
+
+## 📊 PPT 구성
+
+- 표지
+- 목차
+- 교육 개요
+- 커리큘럼
+- 설문 구성
+- 만족도 요약
+- 객관식 문항별 결과
+- 주관식 설문 결과
+- 현장 사진
+- 감사 페이지
+
+문항 수가 많으면 슬라이드가 자동으로 추가됩니다.
+
+---
+
+## 🖼️ 현장 사진
+
+사진은 최대 6장씩 자동 배치됩니다.
+
+지원 형식:
+
+```text
+JPG
+JPEG
+PNG
+WEBP
+BMP
+GIF
+TIFF
+ZIP
+```
+
+ZIP 내부 폴더명은 슬라이드 소제목으로 사용할 수 있습니다.
+
+---
+
+## ⚠️ 사용 시 참고
+
+- PPT 비율은 16:9입니다.
+- 텍스트와 도형은 편집 가능합니다.
+- 객관식 점수는 로우데이터 기준으로 다시 계산합니다.
+- 주관식의 `없음`, `해당 없음` 등은 선택적으로 제외할 수 있습니다.
+- 사진이 없으면 사진 슬라이드는 비워둘 수 있습니다.
+- Sourcery 로그인은 필요하지 않습니다.
+
+---
+
+## 🛠️ 자주 발생하는 오류
+
+### `No module named 'src.excel_parser'`
+
+프로젝트 구조를 확인합니다.
+
+```text
+education_satisfaction_report_mvp/
+├─ app.py
+└─ src/
+   └─ excel_parser.py
+```
+
+`src` 폴더가 한 단계 더 안쪽에 들어가면 안 됩니다.
+
+### 화면이 바뀌지 않을 때
+
+Streamlit을 재시작합니다.
+
+```bash
+Ctrl + C
+python -m streamlit run app.py
+```
+
+브라우저 캐시가 남아 있으면:
+
+```text
+Ctrl + F5
+```
+
+### 전체 화면 스크롤이 안 될 때
+
+최신 `app.py`가 적용됐는지 확인합니다.
+
+---
+
+## 🧪 현재 버전
+
+```text
+v1.7.1 Beta
+```
+
+현재 버전에는 다음 내용이 반영되어 있습니다.
+
+- 실시간 입력 반영
+- 현재 슬라이드 유지
+- 좌우 패널 크기 조절
+- PPT 미리보기 UI 개선
+- 객관식·주관식 레이아웃 개선
+- 실제 PPT 표 높이 정상화
+- 멀티캠퍼스 로고 및 배경 적용
+- 전체 화면 스크롤 복구
+
+---
+
+## 📌 권장 환경
+
+- Windows 10 이상
+- Python 3.10 이상
+- VSCode
+- Chrome 또는 Edge
+- PowerPoint 설치 권장
+
+---
+
+## 📬 문의
+
+오류가 발생하면 아래 내용을 함께 확인합니다.
+
+- 사용한 엑셀 파일
+- 오류 메시지
+- 터미널 로그
+- 문제가 발생한 슬라이드
+- 현재 프로젝트 버전
