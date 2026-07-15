@@ -15,7 +15,7 @@ from src.slide_plan import build_slide_plan
 
 
 st.set_page_config(
-    page_title="교육만족도 결과보고서 생성기(Beta)",
+    page_title="교육만족도 결과보고서 생성기 (Beta)",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -24,8 +24,13 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-      .block-container {padding-top: 1.25rem; padding-bottom: 2rem; max-width: 1800px;}
-      .app-title {font-size:2rem; font-weight:800; margin-bottom:.2rem; color:#ED702C;}
+      .block-container {padding-top: 2.75rem !important; padding-bottom: 2rem; max-width: 1800px;}
+      /* Streamlit의 메인 영역이 자체 스크롤을 담당합니다.
+         overflow: visible로 바꾸면 전체 페이지 스크롤이 사라질 수 있으므로
+         세로 스크롤을 명시적으로 복원합니다. */
+      section[data-testid="stMain"] {overflow-y:auto !important; overflow-x:hidden !important;}
+      .stMainBlockContainer {overflow: visible !important;}
+      .app-title {font-size:clamp(1.65rem, 2.25vw, 2.25rem); line-height:1.42; font-weight:800; margin:.25rem 0 .28rem; color:#ED702C; white-space:normal; word-break:keep-all; overflow:visible; padding:.32rem 0 .2rem;}
       .app-sub {color:#6b7280; margin-bottom:1.1rem;}
       .panel-title {font-size:1.45rem; font-weight:800; margin-bottom:.65rem;}
       div[data-testid="stFileUploader"] {border:1px solid #d9e1e8; border-radius:12px; padding:.4rem .8rem;}
@@ -34,6 +39,11 @@ st.markdown(
       div[data-testid="stVerticalBlockBorderWrapper"] {border-radius:14px;}
       .stNumberInput label, .stSelectbox label, .stCheckbox label, .stFileUploader label {font-size:1.08rem !important; font-weight:700 !important;}
       .stDataFrame, .stDataEditor {font-size:1.05rem;}
+      button[data-testid="stBaseButton-primary"],
+      div.stButton > button[kind="primary"] {background:#ED702C !important; border-color:#ED702C !important; color:#fff !important;}
+      button[data-testid="stBaseButton-primary"]:hover,
+      div.stButton > button[kind="primary"]:hover {background:#D85C1E !important; border-color:#D85C1E !important; color:#fff !important;}
+      #editor-preview-split-marker {height:0; margin:0; padding:0;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -272,7 +282,7 @@ def _sync_slide_jump() -> None:
         st.session_state.slide_id = selected_id
 
 
-st.markdown('<div class="app-title">교육만족도 결과보고서 생성기</div>', unsafe_allow_html=True)
+st.markdown('<div class="app-title">교육만족도 결과보고서 생성기 (Beta)</div>', unsafe_allow_html=True)
 st.markdown('<div class="app-sub">엑셀을 업로드하면 분석 결과가 자동 입력되고, 장표별로 수정하면서 PPT를 생성할 수 있습니다.</div>', unsafe_allow_html=True)
 
 upload_col, reset_col = st.columns([8, 1])
@@ -406,16 +416,176 @@ preview_document = f"""
 """
 
 if current_slide.kind in editable_kinds:
-    left, right = st.columns([0.42, 0.58], gap="large")
+    st.markdown('<div id="editor-preview-split-marker"></div>', unsafe_allow_html=True)
+    left, right = st.columns([0.42, 0.58], gap="small")
     with left:
         with st.container(border=True):
             _render_editor(report, current_slide)
     with right:
         st.markdown('<div class="panel-title">출력 미리보기</div>', unsafe_allow_html=True)
         components.html(preview_document, height=610, scrolling=False)
+
+    # Streamlit columns are fixed by default. This lightweight client-side
+    # splitter adds a draggable vertical divider without changing report data
+    # or forcing the current slide to rerun. The last width is remembered in
+    # the browser for the remainder of the session.
+    components.html(
+        r"""
+        <script>
+        (() => {
+          const doc = window.parent.document;
+          const marker = doc.getElementById('editor-preview-split-marker');
+          if (!marker) return;
+
+          const markerRect = marker.getBoundingClientRect();
+          const scope = marker.closest('[data-testid="stVerticalBlock"]') || doc;
+          const rows = Array.from(scope.querySelectorAll('[data-testid="stHorizontalBlock"]'));
+          const row = rows.find((candidate) => {
+            const rect = candidate.getBoundingClientRect();
+            const cols = candidate.querySelectorAll(':scope > [data-testid="stColumn"]');
+            return cols.length === 2 && rect.top >= markerRect.bottom - 3;
+          });
+          if (!row) return;
+
+          const columns = row.querySelectorAll(':scope > [data-testid="stColumn"]');
+          if (columns.length !== 2) return;
+          const left = columns[0];
+          const right = columns[1];
+
+          row.querySelectorAll('[data-report-splitter="true"]').forEach((node) => node.remove());
+          row.style.position = 'relative';
+          row.style.gap = '0px';
+          row.style.alignItems = 'stretch';
+
+          const splitter = doc.createElement('div');
+          splitter.setAttribute('data-report-splitter', 'true');
+          splitter.title = '좌우로 드래그하여 입력부와 미리보기 너비 조절';
+          Object.assign(splitter.style, {
+            position: 'absolute',
+            top: '0',
+            bottom: '0',
+            width: '18px',
+            transform: 'translateX(-9px)',
+            cursor: 'col-resize',
+            zIndex: '50',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            touchAction: 'none',
+            userSelect: 'none'
+          });
+
+          const line = doc.createElement('div');
+          Object.assign(line.style, {
+            width: '2px',
+            height: '100%',
+            minHeight: '420px',
+            background: '#D8D8D8',
+            borderRadius: '999px',
+            transition: 'background .15s ease, width .15s ease'
+          });
+          splitter.appendChild(line);
+          row.appendChild(splitter);
+
+          let stored = 42;
+          try {
+            const parsed = Number(window.parent.sessionStorage.getItem('education_report_split_pct'));
+            if (Number.isFinite(parsed)) stored = parsed;
+          } catch (_) {}
+
+          const apply = (pct) => {
+            const safe = Math.max(27, Math.min(68, pct));
+            left.style.flex = `0 0 ${safe}%`;
+            left.style.width = `${safe}%`;
+            left.style.maxWidth = `${safe}%`;
+            right.style.flex = '1 1 0';
+            right.style.width = `${100 - safe}%`;
+            right.style.maxWidth = 'none';
+            left.style.paddingRight = '14px';
+            right.style.paddingLeft = '14px';
+            splitter.style.left = `${safe}%`;
+            return safe;
+          };
+
+          let current = apply(stored);
+          let dragging = false;
+
+          const move = (event) => {
+            if (!dragging) return;
+            const rect = row.getBoundingClientRect();
+            current = apply(((event.clientX - rect.left) / rect.width) * 100);
+          };
+          const stop = () => {
+            if (!dragging) return;
+            dragging = false;
+            line.style.background = '#D8D8D8';
+            line.style.width = '2px';
+            doc.body.style.cursor = '';
+            doc.body.style.userSelect = '';
+            try {
+              window.parent.sessionStorage.setItem('education_report_split_pct', String(current));
+            } catch (_) {}
+          };
+
+          splitter.addEventListener('pointerdown', (event) => {
+            dragging = true;
+            splitter.setPointerCapture(event.pointerId);
+            line.style.background = '#ED702C';
+            line.style.width = '4px';
+            doc.body.style.cursor = 'col-resize';
+            doc.body.style.userSelect = 'none';
+            event.preventDefault();
+          });
+          splitter.addEventListener('pointermove', move);
+          splitter.addEventListener('pointerup', stop);
+          splitter.addEventListener('pointercancel', stop);
+          splitter.addEventListener('mouseenter', () => { line.style.background = '#ED702C'; });
+          splitter.addEventListener('mouseleave', () => { if (!dragging) line.style.background = '#D8D8D8'; });
+        })();
+        </script>
+        """,
+        height=0,
+        scrolling=False,
+    )
 else:
-    st.markdown('<div class="panel-title">출력 미리보기</div>', unsafe_allow_html=True)
-    components.html(preview_document, height=690, scrolling=False)
+    # 편집 입력부가 없는 구분장/목차/감사 페이지에서는 이전 장표에서
+    # 삽입된 드래그 분할선과 열 너비 인라인 스타일을 완전히 정리합니다.
+    components.html(
+        r'''<script>
+        (() => {
+          const doc = window.parent.document;
+          const splitters = Array.from(doc.querySelectorAll('[data-report-splitter="true"]'));
+          splitters.forEach((splitter) => {
+            const row = splitter.parentElement;
+            if (row) {
+              const columns = row.querySelectorAll(':scope > [data-testid="stColumn"]');
+              columns.forEach((column) => {
+                column.style.removeProperty('flex');
+                column.style.removeProperty('width');
+                column.style.removeProperty('max-width');
+                column.style.removeProperty('padding-left');
+                column.style.removeProperty('padding-right');
+              });
+              row.style.removeProperty('position');
+              row.style.removeProperty('gap');
+              row.style.removeProperty('align-items');
+            }
+            splitter.remove();
+          });
+        })();
+        </script>''',
+        height=0,
+        scrolling=False,
+    )
+
+    st.markdown('<div class="panel-title" style="text-align:center;">출력 미리보기</div>', unsafe_allow_html=True)
+    preview_left, preview_center, preview_right = st.columns([0.11, 0.78, 0.11])
+    with preview_center:
+        compact_preview_document = preview_document.replace(
+            '</head>',
+            '<style>html,body{width:100%;min-height:100%;display:flex;justify-content:center;align-items:flex-start;}body>.ppt-stage{width:min(100%,1120px);margin:0 auto;padding:8px;}</style></head>',
+        )
+        components.html(compact_preview_document, height=555, scrolling=False)
 
 st.session_state.report = report
 
@@ -439,4 +609,4 @@ with action_right:
         use_container_width=True,
     )
 
-st.caption("v1.4: 표지 괄호 제거, 실제 반영 입력만 노출, 글자 크기 및 객관식 문항 레이아웃 개선, 공식 로고 적용")
+st.caption("v1.7.1 Beta: 전체 화면 세로 스크롤 복원, 상단 잘림 보정, 비편집 장표 중앙 미리보기")
