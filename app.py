@@ -15,7 +15,7 @@ from src.slide_plan import build_slide_plan
 
 
 st.set_page_config(
-    page_title="교육만족도 결과보고서 생성기",
+    page_title="교육만족도 결과보고서 생성기(Beta)",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
