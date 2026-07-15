@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import List, Tuple
 
 import streamlit as st
@@ -20,6 +21,41 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+SAMPLE_DATA_DIR = PROJECT_ROOT / "sample_data"
+RAW_TEMPLATE_PATH = PROJECT_ROOT / "assets" / "만족도_조사_로우데이터_템플릿.xlsx"
+PPT_TEMPLATE_PATH = PROJECT_ROOT / "assets" / "결과보고서_표준양식_참고용.pptx"
+
+
+def _available_sample_files() -> List[Path]:
+    if not SAMPLE_DATA_DIR.exists():
+        return []
+    files = [
+        path for path in SAMPLE_DATA_DIR.iterdir()
+        if path.is_file()
+        and path.suffix.lower() in {".xlsx", ".xlsm"}
+        and not path.name.startswith("~$")
+        and path.name.lower() != "만족도_조사_로우데이터_템플릿.xlsx"
+    ]
+    return sorted(files, key=lambda path: path.name.lower())
+
+
+def _sample_display_name(filename: str) -> str:
+    stem = Path(filename).stem
+    stem = re.sub(r"^\d+[._ -]*", "", stem)
+    return stem.replace("_", " ")
+
+
+def _read_file_bytes(path: Path) -> bytes:
+    return path.read_bytes() if path.exists() else b""
+
+
+def _clear_loaded_report() -> None:
+    for key in ["report", "upload_signature", "slide_index", "slide_id", "slide_jump_id", "ppt_bytes", "photos"]:
+        st.session_state.pop(key, None)
+    _clear_editor_state()
 
 st.markdown(
     """
@@ -285,9 +321,72 @@ def _sync_slide_jump() -> None:
 st.markdown('<div class="app-title">교육만족도 결과보고서 생성기 (Beta)</div>', unsafe_allow_html=True)
 st.markdown('<div class="app-sub">엑셀을 업로드하면 분석 결과가 자동 입력되고, 장표별로 수정하면서 PPT를 생성할 수 있습니다.</div>', unsafe_allow_html=True)
 
-upload_col, reset_col = st.columns([8, 1])
-with upload_col:
-    uploaded_excel = st.file_uploader("설문 엑셀 업로드", type=["xlsx", "xlsm"], key="excel_uploader")
+sample_files = _available_sample_files()
+input_col, resource_col, reset_col = st.columns([6.4, 2.3, 1.1])
+
+input_bytes = None
+input_filename = None
+input_signature = None
+
+with input_col:
+    input_mode = st.radio(
+        "데이터 불러오기 방식",
+        ["직접 업로드", "샘플 로우데이터"],
+        horizontal=True,
+        key="input_mode",
+        on_change=_clear_loaded_report,
+    )
+    if input_mode == "직접 업로드":
+        uploaded_excel = st.file_uploader(
+            "설문 엑셀 업로드",
+            type=["xlsx", "xlsm"],
+            key="excel_uploader",
+        )
+        if uploaded_excel is not None:
+            input_bytes = uploaded_excel.getvalue()
+            input_filename = uploaded_excel.name
+            input_signature = f"upload:{uploaded_excel.name}:{uploaded_excel.size}"
+    else:
+        if sample_files:
+            sample_names = [path.name for path in sample_files]
+            selected_sample_name = st.selectbox(
+                "샘플 로우데이터 선택",
+                options=sample_names,
+                format_func=_sample_display_name,
+                key="sample_raw_selector",
+            )
+            selected_sample = SAMPLE_DATA_DIR / selected_sample_name
+            input_bytes = _read_file_bytes(selected_sample)
+            input_filename = selected_sample.name
+            stat = selected_sample.stat()
+            input_signature = f"sample:{selected_sample.name}:{stat.st_size}:{stat.st_mtime_ns}"
+            st.caption(f"프로젝트의 `sample_data/{selected_sample.name}` 파일을 불러옵니다.")
+        else:
+            st.warning("`sample_data` 폴더에 .xlsx 또는 .xlsm 샘플 파일을 추가해 주세요.")
+
+with resource_col:
+    st.markdown("<div style='font-size:.92rem;font-weight:800;margin:.1rem 0 .38rem;'>템플릿 다운로드</div>", unsafe_allow_html=True)
+    raw_template_bytes = _read_file_bytes(RAW_TEMPLATE_PATH)
+    ppt_template_bytes = _read_file_bytes(PPT_TEMPLATE_PATH)
+    st.download_button(
+        "만족도 조사 엑셀 템플릿",
+        data=raw_template_bytes,
+        file_name=RAW_TEMPLATE_PATH.name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        disabled=not bool(raw_template_bytes),
+        use_container_width=True,
+        key="download_raw_template",
+    )
+    st.download_button(
+        "결과보고서 PPT 템플릿",
+        data=ppt_template_bytes,
+        file_name=PPT_TEMPLATE_PATH.name,
+        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        disabled=not bool(ppt_template_bytes),
+        use_container_width=True,
+        key="download_ppt_template",
+    )
+
 with reset_col:
     st.write("")
     st.write("")
@@ -295,14 +394,13 @@ with reset_col:
         _reset_report()
         st.rerun()
 
-if uploaded_excel:
-    signature = f"{uploaded_excel.name}:{uploaded_excel.size}"
-    if st.session_state.get("upload_signature") != signature:
+if input_bytes is not None and input_filename and input_signature:
+    if st.session_state.get("upload_signature") != input_signature:
         try:
             with st.spinner("엑셀 구조와 설문 결과를 분석하고 있습니다..."):
                 _clear_editor_state()
-                st.session_state.report = parse_excel(uploaded_excel.getvalue(), uploaded_excel.name)
-                st.session_state.upload_signature = signature
+                st.session_state.report = parse_excel(input_bytes, input_filename)
+                st.session_state.upload_signature = input_signature
                 st.session_state.slide_index = 0
                 st.session_state.slide_id = "cover"
                 st.session_state.slide_jump_id = "cover"
@@ -609,4 +707,4 @@ with action_right:
         use_container_width=True,
     )
 
-st.caption("v1.7.1 Beta: 전체 화면 세로 스크롤 복원, 상단 잘림 보정, 비편집 장표 중앙 미리보기")
+st.caption("v1.8 Beta: 직접 업로드·샘플 로우데이터 선택, 엑셀/PPT 템플릿 다운로드")

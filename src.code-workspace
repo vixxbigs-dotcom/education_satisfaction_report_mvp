@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "src",
+			"path": "../../Downloads/education_satisfaction_report_mvp_v1_3_patch/education_satisfaction_report_mvp/src"
+		},
+		{
+			"name": "education_satisfaction_report_mvp",
+			"path": "."
+		},
+		{
+			"name": "docs",
+			"path": "../../Downloads/education_satisfaction_report_mvp_v1_3_patch/education_satisfaction_report_mvp/docs"
+		}
+	],
+	"settings": {}
+}
