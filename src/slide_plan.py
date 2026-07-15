@@ -19,7 +19,7 @@ def build_slide_plan(
     subjective_per_slide: int = 5,
     photo_count: int = 0,
     photos_per_slide: int = 6,
-    survey_questions_per_slide: int = 10,
+    survey_questions_per_slide: int = 8,
     summary_questions_per_slide: int = 7,
 ) -> List[SlideItem]:
     """Create the exact slide order used by both HTML preview and PPT export.

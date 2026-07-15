@@ -19,6 +19,7 @@ BLUE = "#1B9FD0"
 LIGHT_GRID = "#E5E5E5"
 
 ASSET_DIR = Path(__file__).resolve().parent.parent / "assets"
+SUBJECTIVE_PER_SLIDE = 5
 
 
 def _data_uri(filename: str) -> str:
@@ -68,11 +69,11 @@ def _section_background_content(title_html: str, extra_html: str = "") -> str:
 
 
 def _cover(report: ReportData) -> str:
-    course = report.course_name or "[과정 이름]"
+    course = report.course_name or "과정 이름"
     company = f'<div class="section-company">{_e(report.company_name)}</div>' if report.company_name else ""
     schedule = f'<div class="section-schedule">{_e(report.schedule)}</div>' if report.schedule else ""
     return _section_background_content(
-        f'<div class="cover-course">[{_e(course)}]</div><div class="cover-report">결과보고서</div>',
+        f'<div class="cover-course">{_e(course)}</div><div class="cover-report">결과보고서</div>',
         company + schedule,
     )
 
@@ -143,7 +144,7 @@ def _curriculum(report: ReportData) -> str:
 def _survey_structure(report: ReportData, slide: SlideItem) -> str:
     questions = list(report.objective_questions) + list(report.subjective_questions)
     start = int(slide.payload.get("start", 0))
-    end = int(slide.payload.get("end", min(start + 10, len(questions))))
+    end = int(slide.payload.get("end", min(start + 8, len(questions))))
     chunk = questions[start:end]
     rows = "".join(
         f"<tr><td>{_e(q.section_label)}</td><td>{start + idx}. {_e(strip_leading_question_numbers(q.question))}</td></tr>"
@@ -151,7 +152,7 @@ def _survey_structure(report: ReportData, slide: SlideItem) -> str:
     )
     if not rows:
         rows = '<tr><td colspan="2" class="empty-cell"></td></tr>'
-    suffix = f" ({slide.payload.get('page_index', 0) + 1})" if len(questions) > 10 else ""
+    suffix = f" ({slide.payload.get('page_index', 0) + 1})" if len(questions) > 8 else ""
     return _base(
         f"""
         {_content_header(f'1) 설문 구성{suffix}', '02', '만족도 통계')}
@@ -216,12 +217,21 @@ def _objective(report: ReportData, slide: SlideItem) -> str:
     colors = [PURPLE, BLUE, ORANGE, "#F39A66", "#C9C9C9", "#B4B4B4", "#9B9B9B"]
     for idx, (label, count) in enumerate(zip(q.scale_labels, q.counts)):
         width = max(0.0, min(100.0, (count / max_count) * 100.0))
-        value = f'<span class="objective-count">{count}</span>' if count > 0 else ""
+        if count > 0:
+            fill = (
+                f'<div class="objective-fill" '
+                f'style="width:{width:.1f}%;background:{colors[idx % len(colors)]}">'
+                f'<span class="objective-count">{count}</span></div>'
+            )
+        else:
+            # A zero-value response keeps the grid row but renders no colored
+            # rectangle at all. This avoids the tiny square shown by a 0%-wide div.
+            fill = ""
         rows.append(
             f"""
             <div class="objective-row">
               <div class="objective-label">{_e(label)}</div>
-              <div class="objective-track"><div class="objective-fill" style="width:{width:.1f}%;background:{colors[idx % len(colors)]}">{value}</div></div>
+              <div class="objective-track">{fill}</div>
             </div>
             """
         )
@@ -240,7 +250,9 @@ def _subjective(report: ReportData, slide: SlideItem) -> str:
     q_index = int(slide.payload["question_index"])
     q = report.subjective_questions[q_index]
     question_no = len(report.objective_questions) + q_index + 1
-    answers: Sequence[str] = slide.payload.get("answers", [])
+    chunk_index = int(slide.payload.get("chunk_index", 0))
+    start = chunk_index * SUBJECTIVE_PER_SLIDE
+    answers: Sequence[str] = q.answers[start : start + SUBJECTIVE_PER_SLIDE]
     items = "".join(f'<li>{_e(a)}</li>' for a in answers)
     if not items:
         items = '<li class="empty-opinion">별도 의견 없음</li>'
@@ -258,12 +270,18 @@ def _subjective(report: ReportData, slide: SlideItem) -> str:
 def _photos(slide: SlideItem, photo_names: List[str]) -> str:
     start = int(slide.payload.get("page_index", 0)) * 6
     names = photo_names[start : start + 6]
-    cells = "".join(f'<div class="photo-cell">{_e(name)}</div>' for name in names)
-    cells += "".join('<div class="photo-cell empty">사진</div>' for _ in range(6 - len(names)))
+    if names:
+        cells = "".join(f'<div class="photo-cell">{_e(name)}</div>' for name in names)
+        cells += "".join('<div class="photo-cell empty"></div>' for _ in range(6 - len(names)))
+        body = f'<div class="photo-grid">{cells}</div>'
+    else:
+        # The reference template intentionally leaves the body white until photos
+        # are uploaded. Do not show gray placeholder tiles on an empty page.
+        body = '<div class="photo-empty-canvas"></div>'
     return _base(
         f"""
         {_content_header(f"3) 현장 사진{_e(slide.payload.get('page_suffix', ''))}", '03', '현장 사진')}
-        <div class="photo-grid">{cells}</div>
+        {body}
         {_content_footer()}
         """
     )
@@ -302,11 +320,11 @@ PREVIEW_CSS = f"""
 .section-right-title {{position:absolute;left:51.5%;top:35%;width:39%;color:var(--orange);font-weight:800;line-height:1.18;}}
 .cover-course {{font-size:clamp(21px,3vw,48px);word-break:keep-all;}}
 .cover-report {{font-size:clamp(24px,3.5vw,56px);}}
-.section-company {{position:absolute;left:51.7%;top:28%;font-size:clamp(9px,1vw,17px);color:#777;}}
-.section-schedule {{position:absolute;left:51.7%;top:60%;font-size:clamp(9px,1vw,17px);color:#777;}}
+.section-company {{position:absolute;left:51.7%;top:28%;font-size:clamp(11px,1.15vw,19px);color:#777;}}
+.section-schedule {{position:absolute;left:51.7%;top:60%;font-size:clamp(11px,1.15vw,19px);color:#777;}}
 .section-heading {{font-size:clamp(25px,3.6vw,58px);}}
 .section-heading small {{display:block;font-size:.48em;margin-bottom:.2em;}}
-.section-item-line {{position:absolute;left:51.7%;top:57%;width:39%;font-size:clamp(9px,1.05vw,17px);color:#777;line-height:1.6;}}
+.section-item-line {{position:absolute;left:51.7%;top:57%;width:39%;font-size:clamp(12px,1.25vw,21px);color:#777;line-height:1.6;}}
 .toc-right-list {{position:absolute;left:51.7%;top:44%;width:40%;display:flex;flex-direction:column;gap:1.4vh;}}
 .toc-right-list div {{display:grid;grid-template-columns:12% 31% 57%;align-items:start;}}
 .toc-right-list span {{font-weight:800;color:var(--orange);font-size:clamp(11px,1.2vw,20px);}}
@@ -316,44 +334,47 @@ PREVIEW_CSS = f"""
 .thanks-sub {{font-size:clamp(13px,1.5vw,24px);margin-top:.35em;}}
 .content-main-title {{position:absolute;left:2.4%;top:4.1%;z-index:2;background:#fff;padding-right:1%;font-size:clamp(20px,3vw,48px);font-weight:800;color:var(--orange);letter-spacing:-.04em;}}
 .content-rule {{position:absolute;left:24%;right:3.4%;top:9.7%;height:.55%;background:var(--orange);}}
-.content-section-tag {{position:absolute;right:2.7%;top:3.8%;display:flex;align-items:center;gap:.8em;background:#fff;padding-left:.8em;color:var(--orange);font-size:clamp(12px,1.6vw,26px);font-weight:800;}}
+.content-section-tag {{position:absolute;right:2.7%;top:3.8%;display:flex;align-items:center;gap:.8em;background:#fff;padding-left:.8em;color:var(--orange);font-size:clamp(13px,1.55vw,25px);font-weight:800;white-space:nowrap;}}
 .content-section-tag span {{display:inline-flex;align-items:center;justify-content:center;background:var(--orange);color:#fff;padding:.18em .6em;font-weight:500;}}
-.content-logo {{position:absolute;right:3.6%;bottom:3.4%;width:10.8%;height:auto;object-fit:contain;}}
+.content-logo {{position:absolute;right:3.2%;bottom:3.2%;width:11.2%;height:auto;object-fit:contain;}}
 .content-logo-text {{position:absolute;right:3.6%;bottom:3.4%;font-size:clamp(9px,1vw,16px);font-weight:800;color:#111;}}
 .overview-grid {{position:absolute;left:9%;top:21%;width:80%;height:61%;display:grid;grid-template-columns:23% 77%;grid-template-rows:repeat(4,1fr) 1.65fr;border-top:1px solid #cfcfcf;border-left:1px solid #cfcfcf;}}
-.overview-label,.overview-value {{display:flex;align-items:center;padding:0 4%;border-right:1px solid #cfcfcf;border-bottom:1px solid #cfcfcf;font-size:clamp(9px,1.05vw,17px);}}
-.overview-label {{font-weight:700;background:#f5f5f5;}}
-.curriculum-table,.survey-table {{position:absolute;left:4.8%;top:19%;width:90.4%;border-collapse:collapse;table-layout:fixed;font-size:clamp(7px,.78vw,13px);}}
+.overview-label,.overview-value {{display:flex;align-items:center;padding:0 4%;border-right:1px solid #cfcfcf;border-bottom:1px solid #cfcfcf;font-size:clamp(12px,1.25vw,21px);}}
+.overview-label {{font-weight:800;background:var(--orange);color:#fff;justify-content:center;font-size:clamp(13px,1.35vw,22px);}}
+.overview-value {{font-weight:600;font-size:clamp(12px,1.25vw,21px);}}
+.curriculum-table,.survey-table {{position:absolute;left:4.8%;top:19%;width:90.4%;border-collapse:collapse;table-layout:fixed;font-size:clamp(10px,1.02vw,17.5px);}}
 .curriculum-table th,.survey-table th {{background:var(--orange);color:white;padding:.8%;border:1px solid #fff;}}
 .curriculum-table td,.survey-table td {{padding:.75%;border:1px solid #d4d4d4;vertical-align:middle;line-height:1.35;}}
 .curriculum-table th:nth-child(1){{width:12%;}}.curriculum-table th:nth-child(2){{width:19%;}}.curriculum-table th:nth-child(3){{width:51%;}}.curriculum-table th:nth-child(4){{width:18%;}}
 .survey-table th:first-child{{width:23%;}}.survey-table td:first-child{{font-weight:700;background:#f7f7f7;}}
 .empty-cell{{height:4em;}}
-.summary-note {{position:absolute;left:7%;top:14%;font-size:clamp(10px,1.1vw,18px);line-height:1.8;}}
+.summary-note {{position:absolute;left:7%;top:14%;font-size:clamp(13px,1.32vw,22px);line-height:1.8;}}
 .summary-note b{{display:block;}}.summary-note span{{display:block;margin-left:1.2em;color:#222;}}
 .summary-chart-wrap {{position:absolute;left:7%;top:24%;width:88%;height:58%;display:grid;grid-template-columns:5% 95%;}}
-.summary-y-labels {{display:flex;flex-direction:column;justify-content:space-between;text-align:right;padding-right:14%;font-size:clamp(8px,.9vw,15px);color:#555;}}
+.summary-y-labels {{display:flex;flex-direction:column;justify-content:space-between;text-align:right;padding-right:14%;font-size:clamp(11px,1.07vw,18px);color:#555;}}
 .summary-plot {{position:relative;border-left:1px solid #2a94bf;border-bottom:1px solid #ddd;background:repeating-linear-gradient(to bottom,var(--grid) 0,var(--grid) 1px,transparent 1px,transparent 16.666%);}}
 .summary-bars {{position:absolute;left:2%;right:1%;top:0;bottom:0;display:flex;align-items:flex-end;justify-content:space-around;gap:1.2%;}}
 .summary-bar-column {{position:relative;height:100%;flex:1;display:flex;align-items:center;justify-content:flex-end;flex-direction:column;min-width:0;}}
 .summary-bar {{width:28%;min-width:18px;background:var(--orange);}}
-.summary-value {{font-size:clamp(9px,1vw,17px);margin-bottom:.4em;color:#111;}}
-.summary-x-label {{position:absolute;top:103%;width:130%;text-align:center;font-size:clamp(7px,.78vw,13px);line-height:1.25;color:#555;word-break:keep-all;}}
-.question-title,.subjective-question {{position:absolute;left:5.2%;top:16%;width:89%;font-size:clamp(11px,1.35vw,22px);font-weight:800;line-height:1.45;}}
+.summary-value {{font-size:clamp(11px,1.15vw,19px);margin-bottom:.4em;color:#111;}}
+.summary-x-label {{position:absolute;top:103%;width:130%;text-align:center;font-size:clamp(10px,1vw,17px);line-height:1.25;color:#555;word-break:keep-all;}}
+.question-title {{position:absolute;left:5.2%;top:16%;width:89%;max-height:11%;overflow:hidden;font-size:clamp(11px,1.18vw,19px);font-weight:800;line-height:1.32;word-break:keep-all;}}
+.subjective-question {{position:absolute;left:5.2%;top:16%;width:89%;font-size:clamp(12px,1.32vw,22px);font-weight:800;line-height:1.4;}}
 .objective-chart {{position:absolute;left:10.4%;top:25%;width:84%;height:57%;display:flex;flex-direction:column;justify-content:space-between;}}
 .objective-row {{display:grid;grid-template-columns:0 100%;grid-template-rows:auto 1fr;position:relative;flex:1;min-height:0;}}
-.objective-label {{grid-column:2;align-self:end;margin-bottom:.35em;font-size:clamp(9px,1vw,17px);}}
+.objective-label {{grid-column:2;align-self:end;margin-bottom:.35em;font-size:clamp(12px,1.22vw,20px);}}
 .objective-track {{grid-column:2;position:relative;height:36%;min-height:14px;background:repeating-linear-gradient(to right,#e8e8e8 0,#e8e8e8 1px,transparent 1px,transparent calc(100% / 9));}}
-.objective-fill {{height:100%;display:flex;align-items:center;justify-content:flex-end;padding-right:.7em;min-width:0;}}
-.objective-count {{color:#fff;font-weight:800;font-size:clamp(8px,.9vw,15px);}}
-.objective-ticks {{display:flex;justify-content:space-between;font-size:clamp(7px,.75vw,12px);color:#555;margin-top:.3em;}}
+.objective-fill {{height:100%;display:flex;align-items:center;justify-content:flex-end;padding-right:.7em;min-width:0;overflow:hidden;}}
+.objective-count {{color:#fff;font-weight:800;font-size:clamp(10px,1.02vw,17px);}}
+.objective-ticks {{display:flex;justify-content:space-between;font-size:clamp(10px,.92vw,15px);color:#555;margin-top:.3em;}}
 .subjective-question {{top:16%;}}
-.opinion-list {{position:absolute;left:7.2%;top:24%;width:87%;height:60%;margin:0;padding-left:1.6em;display:flex;flex-direction:column;gap:1.4%;font-size:clamp(8px,.9vw,15px);line-height:1.48;}}
+.opinion-list {{position:absolute;left:7.2%;top:24%;width:87%;height:60%;margin:0;padding-left:1.6em;display:flex;flex-direction:column;gap:1.4%;font-size:clamp(11px,1.1vw,18px);line-height:1.48;}}
 .opinion-list li {{padding-left:.35em;}}
 .opinion-list li::marker {{content:'-  ';color:#444;}}
 .empty-opinion{{color:#999;}}
 .photo-grid {{position:absolute;left:4.7%;top:17%;width:90.6%;height:68%;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:1.4%;}}
 .photo-cell {{display:flex;align-items:center;justify-content:center;background:#f1f1f1;border:1px solid #ddd;color:#777;font-size:clamp(8px,.8vw,14px);padding:4%;text-align:center;overflow:hidden;}}
-.photo-cell.empty{{color:#aaa;}}
+.photo-cell.empty{{background:#fff;border-color:#eee;color:transparent;}}
+.photo-empty-canvas {{position:absolute;left:4.7%;top:17%;width:90.6%;height:68%;background:#fff;}}
 </style>
 """

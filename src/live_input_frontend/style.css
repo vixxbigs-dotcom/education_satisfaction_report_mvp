@@ -11,7 +11,7 @@ label {
   align-items: center;
   min-height: 24px;
   margin: 0 0 6px;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.4;
   color: var(--text-color);
 }
@@ -29,18 +29,18 @@ label {
 input, textarea {
   display: block;
   width: 100%;
-  padding: 10px 12px;
+  padding: 11px 13px;
   border: 0;
   outline: none;
   resize: vertical;
   background: transparent;
   color: var(--text-color);
   font-family: var(--font);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
   caret-color: var(--text-color);
 }
-input { height: 42px; resize: none; }
+input { height: 45px; resize: none; }
 textarea { min-height: 48px; }
 input:disabled, textarea:disabled { cursor: not-allowed; opacity: .55; }
 .label-hidden label { visibility: hidden; }

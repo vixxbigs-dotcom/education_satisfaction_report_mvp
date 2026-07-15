@@ -35,6 +35,7 @@ FONT = "맑은 고딕"
 ASSET_DIR = Path(__file__).resolve().parent.parent / "assets"
 SECTION_BACKGROUND = ASSET_DIR / "multicampus_section_background.png"
 LOGO_PATH = ASSET_DIR / "multicampus_logo.png"
+SUBJECTIVE_PER_SLIDE = 5
 
 
 def _set_bg(slide, color=WHITE):
@@ -91,13 +92,13 @@ def _add_full_background(slide) -> None:
 
 def _add_logo(slide) -> None:
     if LOGO_PATH.exists():
-        slide.shapes.add_picture(str(LOGO_PATH), Inches(11.45), Inches(6.95), Inches(1.4), Inches(0.43))
+        slide.shapes.add_picture(str(LOGO_PATH), Inches(11.45), Inches(6.98), Inches(1.55), Inches(0.247))
     else:
         _add_text(slide, "multicampus", Inches(11.25), Inches(6.95), Inches(1.6), Inches(0.3), 10, True, BLACK, PP_ALIGN.RIGHT)
 
 
 def _add_content_header(slide, main_title: str, section_no: str, section_title: str) -> None:
-    _add_text(slide, main_title, Inches(0.32), Inches(0.3), Inches(4.7), Inches(0.48), 27, True, ORANGE)
+    _add_text(slide, main_title, Inches(0.32), Inches(0.27), Inches(5.0), Inches(0.56), 31, True, ORANGE)
     line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(3.6), Inches(0.73), Inches(7.75), Inches(0.035))
     line.fill.solid()
     line.fill.fore_color.rgb = ORANGE
@@ -107,8 +108,8 @@ def _add_content_header(slide, main_title: str, section_no: str, section_title: 
     box.fill.solid()
     box.fill.fore_color.rgb = ORANGE
     box.line.fill.background()
-    _add_text(slide, section_no, Inches(11.41), Inches(0.32), Inches(0.52), Inches(0.35), 15, False, WHITE, PP_ALIGN.CENTER)
-    _add_text(slide, section_title, Inches(12.0), Inches(0.31), Inches(1.15), Inches(0.38), 16, True, ORANGE, PP_ALIGN.LEFT)
+    _add_text(slide, section_no, Inches(11.41), Inches(0.32), Inches(0.52), Inches(0.35), 16.5, False, WHITE, PP_ALIGN.CENTER)
+    _add_text(slide, section_title, Inches(11.98), Inches(0.30), Inches(1.34), Inches(0.40), 15.5, True, ORANGE, PP_ALIGN.LEFT)
     _add_logo(slide)
 
 
@@ -117,7 +118,7 @@ def _add_cover(prs: Presentation, report: ReportData) -> None:
     _add_full_background(slide)
     if report.company_name:
         _add_text(slide, report.company_name, Inches(6.9), Inches(2.18), Inches(5.25), Inches(0.36), 12, False, MUTED)
-    _add_text(slide, f"[{report.course_name or '과정 이름'}]", Inches(6.88), Inches(3.08), Inches(5.4), Inches(0.55), 29, True, ORANGE, valign=MSO_ANCHOR.BOTTOM)
+    _add_text(slide, report.course_name or '과정 이름', Inches(6.88), Inches(3.08), Inches(5.4), Inches(0.55), 29, True, ORANGE, valign=MSO_ANCHOR.BOTTOM)
     _add_text(slide, "결과보고서", Inches(6.88), Inches(3.62), Inches(5.4), Inches(0.58), 31, True, ORANGE, valign=MSO_ANCHOR.TOP)
     if report.schedule:
         _add_text(slide, report.schedule, Inches(6.9), Inches(4.55), Inches(4.8), Inches(0.32), 11, False, MUTED)
@@ -149,7 +150,14 @@ def _add_section(prs: Presentation, slide_item: SlideItem) -> None:
     _add_text(slide, items, Inches(6.9), Inches(4.03), Inches(5.1), Inches(0.42), 11, False, MUTED)
 
 
-def _style_table(table, header=True, first_col_gray=False) -> None:
+def _style_table(
+    table,
+    header=True,
+    first_col_gray=False,
+    first_col_orange=False,
+    body_font_size=11.0,
+    header_font_size=11.5,
+) -> None:
     for r_idx, row in enumerate(table.rows):
         for c_idx, cell in enumerate(row.cells):
             cell.margin_left = Inches(0.08)
@@ -157,23 +165,38 @@ def _style_table(table, header=True, first_col_gray=False) -> None:
             cell.margin_top = Inches(0.035)
             cell.margin_bottom = Inches(0.035)
             cell.vertical_anchor = MSO_ANCHOR.MIDDLE
-            if r_idx == 0 and header:
-                cell.fill.solid()
+            is_header = r_idx == 0 and header
+            is_orange_col = first_col_orange and c_idx == 0 and not is_header
+            is_gray_col = first_col_gray and c_idx == 0 and not is_header
+            cell.fill.solid()
+            if is_header or is_orange_col:
                 cell.fill.fore_color.rgb = ORANGE
-            elif first_col_gray and c_idx == 0:
-                cell.fill.solid()
+            elif is_gray_col:
                 cell.fill.fore_color.rgb = LIGHT
             else:
-                cell.fill.solid()
                 cell.fill.fore_color.rgb = WHITE
             for p in cell.text_frame.paragraphs:
-                p.alignment = PP_ALIGN.LEFT
+                p.alignment = PP_ALIGN.CENTER if is_orange_col else PP_ALIGN.LEFT
                 for run in p.runs:
                     run.font.name = FONT
-                    run.font.size = Pt(9.5)
-                    run.font.color.rgb = WHITE if r_idx == 0 and header else DARK
-                    run.font.bold = (r_idx == 0 and header) or (first_col_gray and c_idx == 0)
+                    run.font.size = Pt(header_font_size if is_header else body_font_size)
+                    run.font.color.rgb = WHITE if is_header or is_orange_col else DARK
+                    run.font.bold = is_header or is_orange_col or is_gray_col
 
+
+
+
+def _apply_table_row_heights(table, heights_in: Sequence[float]) -> None:
+    """Set explicit row heights so PPT tables do not stretch vertically.
+
+    python-pptx distributes rows across the height passed to add_table().
+    When a slide has only a few rows, a large fixed table height makes each
+    row expand unnaturally. Calling this after text insertion normalizes rows
+    to the intended content height.
+    """
+    for idx, height in enumerate(heights_in):
+        if idx < len(table.rows):
+            table.rows[idx].height = Inches(height)
 
 def _add_overview(prs: Presentation, report: ReportData) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -189,15 +212,15 @@ def _add_overview(prs: Presentation, report: ReportData) -> None:
         ("교육 대상", target),
         ("교육 목표", report.objective),
     ]
-    table_shape = slide.shapes.add_table(5, 2, Inches(1.25), Inches(1.6), Inches(10.75), Inches(4.8))
+    table_shape = slide.shapes.add_table(5, 2, Inches(0.46), Inches(1.32), Inches(12.08), Inches(5.55))
     table = table_shape.table
-    table.columns[0].width = Inches(2.35)
-    table.columns[1].width = Inches(8.4)
+    table.columns[0].width = Inches(2.20)
+    table.columns[1].width = Inches(9.88)
     for i, (label, value) in enumerate(data):
         table.cell(i, 0).text = label
         table.cell(i, 1).text = str(value or "")
-        table.rows[i].height = Inches(0.78 if i < 4 else 1.68)
-    _style_table(table, header=False, first_col_gray=True)
+        table.rows[i].height = Inches(1.06 if i < 4 else 1.30)
+    _style_table(table, header=False, first_col_orange=True, body_font_size=13.0)
 
 
 def _add_curriculum(prs: Presentation, report: ReportData) -> None:
@@ -206,8 +229,11 @@ def _add_curriculum(prs: Presentation, report: ReportData) -> None:
     _add_content_header(slide, "2) 커리큘럼", "01", "교육 개요")
     rows = report.curriculum[:8]
     row_count = max(2, len(rows) + 1)
-    shape = slide.shapes.add_table(row_count, 4, Inches(0.62), Inches(1.45), Inches(12.08), Inches(5.18))
+    row_heights = [0.48] + [0.50] * (row_count - 1)
+    table_h = sum(row_heights)
+    shape = slide.shapes.add_table(row_count, 4, Inches(0.62), Inches(1.45), Inches(12.08), Inches(table_h))
     table = shape.table
+    _apply_table_row_heights(table, row_heights)
     widths = [1.15, 2.1, 6.75, 2.08]
     for idx, width in enumerate(widths):
         table.columns[idx].width = Inches(width)
@@ -221,22 +247,26 @@ def _add_curriculum(prs: Presentation, report: ReportData) -> None:
     else:
         table.cell(1, 0).merge(table.cell(1, 3))
         table.cell(1, 0).text = ""
-    _style_table(table)
+    _style_table(table, body_font_size=11.4, header_font_size=12.0)
 
 
 def _add_survey_structure(prs: Presentation, report: ReportData, slide_item: SlideItem) -> None:
     questions = list(report.objective_questions) + list(report.subjective_questions)
     start = int(slide_item.payload.get("start", 0))
-    end = int(slide_item.payload.get("end", min(start + 10, len(questions))))
+    end = int(slide_item.payload.get("end", min(start + 8, len(questions))))
     chunk = questions[start:end]
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _set_bg(slide)
     title = "1) 설문 구성"
-    if len(questions) > 10:
+    if len(questions) > 8:
         title += f" ({int(slide_item.payload.get('page_index', 0)) + 1})"
     _add_content_header(slide, title, "02", "만족도 통계")
-    shape = slide.shapes.add_table(max(2, len(chunk) + 1), 2, Inches(0.62), Inches(1.45), Inches(12.08), Inches(5.22))
+    row_count = max(2, len(chunk) + 1)
+    row_heights = [0.48] + [0.55] * (row_count - 1)
+    table_h = sum(row_heights)
+    shape = slide.shapes.add_table(row_count, 2, Inches(0.62), Inches(1.45), Inches(12.08), Inches(table_h))
     table = shape.table
+    _apply_table_row_heights(table, row_heights)
     table.columns[0].width = Inches(2.45)
     table.columns[1].width = Inches(9.63)
     table.cell(0, 0).text = "항목"
@@ -247,7 +277,7 @@ def _add_survey_structure(prs: Presentation, report: ReportData, slide_item: Sli
     if not chunk:
         table.cell(1, 0).merge(table.cell(1, 1))
         table.cell(1, 0).text = ""
-    _style_table(table, first_col_gray=True)
+    _style_table(table, first_col_gray=True, body_font_size=11.4, header_font_size=12.0)
 
 
 def _summary_label(q: ObjectiveQuestion) -> str:
@@ -270,7 +300,7 @@ def _add_summary(prs: Presentation, report: ReportData, slide_item: SlideItem) -
         title += f" ({int(slide_item.payload.get('page_index', 0)) + 1})"
     _add_content_header(slide, title, "02", "만족도 통계")
 
-    _add_text(slide, "■ 만족도 요약", Inches(0.95), Inches(1.05), Inches(3.2), Inches(0.34), 13, True, DARK)
+    _add_text(slide, "■ 만족도 요약", Inches(0.95), Inches(1.05), Inches(3.5), Inches(0.38), 15, True, DARK)
     if report.total_participants:
         count_line = (
             f"- 수강인원 총 {report.total_participants}명 중 {report.response_count}명 응답"
@@ -278,7 +308,7 @@ def _add_summary(prs: Presentation, report: ReportData, slide_item: SlideItem) -
         )
     else:
         count_line = f"- 총 {report.response_count}명 응답"
-    _add_text(slide, count_line, Inches(1.18), Inches(1.38), Inches(8.5), Inches(0.32), 11.5, False, BLACK)
+    _add_text(slide, count_line, Inches(1.18), Inches(1.39), Inches(8.8), Inches(0.34), 14, False, BLACK)
 
     chart_x, chart_y, chart_w, chart_h = 1.4, 1.82, 11.35, 4.3
     for value in range(7):
@@ -287,7 +317,7 @@ def _add_summary(prs: Presentation, report: ReportData, slide_item: SlideItem) -
         line.fill.solid()
         line.fill.fore_color.rgb = GRID
         line.line.fill.background()
-        _add_text(slide, f"{value:.1f}", Inches(0.82), Inches(y - 0.14), Inches(0.45), Inches(0.28), 10, False, MUTED, PP_ALIGN.RIGHT)
+        _add_text(slide, f"{value:.1f}", Inches(0.78), Inches(y - 0.14), Inches(0.5), Inches(0.28), 11, False, MUTED, PP_ALIGN.RIGHT)
 
     y_axis = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(chart_x), Inches(chart_y), Inches(0.012), Inches(chart_h))
     y_axis.fill.solid()
@@ -311,9 +341,9 @@ def _add_summary(prs: Presentation, report: ReportData, slide_item: SlideItem) -
         bar.fill.solid()
         bar.fill.fore_color.rgb = ORANGE
         bar.line.fill.background()
-        _add_text(slide, f"{q.average:.1f}", Inches(center_x - 0.35), Inches(bar_y - 0.28), Inches(0.7), Inches(0.26), 11, False, BLACK, PP_ALIGN.CENTER)
+        _add_text(slide, f"{q.average:.1f}", Inches(center_x - 0.35), Inches(bar_y - 0.30), Inches(0.7), Inches(0.28), 12.5, False, BLACK, PP_ALIGN.CENTER)
         label = _summary_label(q)
-        _add_text(slide, label, Inches(center_x - slot * 0.48), Inches(chart_y + chart_h + 0.1), Inches(slot * 0.96), Inches(0.62), 9, False, MUTED, PP_ALIGN.CENTER, MSO_ANCHOR.TOP)
+        _add_text(slide, label, Inches(center_x - slot * 0.48), Inches(chart_y + chart_h + 0.1), Inches(slot * 0.96), Inches(0.66), 11.2, False, MUTED, PP_ALIGN.CENTER, MSO_ANCHOR.TOP)
 
 
 def _axis_max(max_count: int) -> Tuple[int, int]:
@@ -323,19 +353,31 @@ def _axis_max(max_count: int) -> Tuple[int, int]:
     return int(math.ceil(max_count / step) * step), step
 
 
+def _objective_question_font_size(text: str) -> float:
+    length = len(str(text or ""))
+    if length <= 58:
+        return 14.5
+    if length <= 90:
+        return 13.2
+    if length <= 125:
+        return 12.2
+    return 11.2
+
+
 def _add_objective(prs: Presentation, report: ReportData, q_index: int) -> None:
     q = report.objective_questions[q_index]
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _set_bg(slide)
     _add_content_header(slide, "2) 객관식 설문 결과", "02", "만족도 통계")
+    question_text = f"■ {q.section_label} {q_index + 1}. {strip_leading_question_numbers(q.question)}"
     _add_text(
         slide,
-        f"■ {q.section_label} {q_index + 1}. {strip_leading_question_numbers(q.question)}",
+        question_text,
         Inches(0.88),
         Inches(1.18),
         Inches(11.55),
-        Inches(0.55),
-        14,
+        Inches(0.78),
+        _objective_question_font_size(question_text),
         True,
         DARK,
         valign=MSO_ANCHOR.TOP,
@@ -343,7 +385,7 @@ def _add_objective(prs: Presentation, report: ReportData, q_index: int) -> None:
 
     raw_max = max(report.response_count, q.valid_responses, max(q.counts) if q.counts else 0, 1)
     axis_max, step = _axis_max(raw_max)
-    chart_x, chart_y, chart_w, chart_h = 1.4, 1.9, 11.25, 4.25
+    chart_x, chart_y, chart_w, chart_h = 1.4, 2.02, 11.25, 4.13
     tick_values = list(range(0, axis_max + 1, step))
     for tick in tick_values:
         x = chart_x + chart_w * tick / axis_max
@@ -351,14 +393,14 @@ def _add_objective(prs: Presentation, report: ReportData, q_index: int) -> None:
         line.fill.solid()
         line.fill.fore_color.rgb = GRID
         line.line.fill.background()
-        _add_text(slide, str(tick), Inches(x - 0.18), Inches(chart_y + chart_h + 0.06), Inches(0.36), Inches(0.24), 8.5, False, MUTED, PP_ALIGN.CENTER)
+        _add_text(slide, str(tick), Inches(x - 0.18), Inches(chart_y + chart_h + 0.06), Inches(0.36), Inches(0.26), 9.5, False, MUTED, PP_ALIGN.CENTER)
 
     count_rows = max(1, len(q.scale_labels))
     row_h = chart_h / count_rows
     colors = [PURPLE, BLUE, ORANGE, RGBColor(243, 154, 102), RGBColor(201, 201, 201), RGBColor(180, 180, 180), RGBColor(155, 155, 155)]
     for idx, (label, count) in enumerate(zip(q.scale_labels, q.counts)):
         row_y = chart_y + idx * row_h
-        _add_text(slide, label, Inches(chart_x + 0.08), Inches(row_y), Inches(3.0), Inches(0.28), 11, False, DARK, valign=MSO_ANCHOR.BOTTOM)
+        _add_text(slide, label, Inches(chart_x + 0.08), Inches(row_y), Inches(3.2), Inches(0.32), 13.6, False, DARK, valign=MSO_ANCHOR.BOTTOM)
         bar_y = row_y + 0.31
         bar_h = min(0.34, row_h * 0.42)
         bar_w = chart_w * count / axis_max if axis_max else 0
@@ -368,24 +410,26 @@ def _add_objective(prs: Presentation, report: ReportData, q_index: int) -> None:
             bar.fill.fore_color.rgb = colors[idx % len(colors)]
             bar.line.fill.background()
             if bar_w >= 0.35:
-                _add_text(slide, str(count), Inches(chart_x + max(0, bar_w - 0.42)), Inches(bar_y), Inches(0.35), Inches(bar_h), 10, True, WHITE, PP_ALIGN.RIGHT)
+                _add_text(slide, str(count), Inches(chart_x + max(0, bar_w - 0.42)), Inches(bar_y), Inches(0.35), Inches(bar_h), 11, True, WHITE, PP_ALIGN.RIGHT)
             else:
-                _add_text(slide, str(count), Inches(chart_x + bar_w + 0.04), Inches(bar_y), Inches(0.35), Inches(bar_h), 9.5, True, DARK)
+                _add_text(slide, str(count), Inches(chart_x + bar_w + 0.04), Inches(bar_y), Inches(0.35), Inches(bar_h), 10.5, True, DARK)
 
 
 def _subjective_font_size(answers: Sequence[str]) -> float:
     total_chars = sum(len(str(a)) for a in answers)
     if len(answers) <= 4 and total_chars <= 420:
-        return 11.5
+        return 13.0
     if total_chars <= 650:
-        return 10.5
-    return 9.5
+        return 12.0
+    return 10.7
 
 
 def _add_subjective(prs: Presentation, report: ReportData, slide_item: SlideItem) -> None:
     q_index = int(slide_item.payload["question_index"])
     q = report.subjective_questions[q_index]
-    answers: Sequence[str] = slide_item.payload.get("answers", []) or ["별도 의견 없음"]
+    chunk_index = int(slide_item.payload.get("chunk_index", 0))
+    start = chunk_index * SUBJECTIVE_PER_SLIDE
+    answers: Sequence[str] = q.answers[start : start + SUBJECTIVE_PER_SLIDE] or ["별도 의견 없음"]
     question_no = len(report.objective_questions) + q_index + 1
     suffix = slide_item.payload.get("page_suffix", "")
 
@@ -398,8 +442,8 @@ def _add_subjective(prs: Presentation, report: ReportData, slide_item: SlideItem
         Inches(0.68),
         Inches(1.2),
         Inches(12.0),
-        Inches(0.55),
-        14,
+        Inches(0.68),
+        16,
         True,
         DARK,
         valign=MSO_ANCHOR.TOP,
@@ -441,10 +485,12 @@ def _add_photos(prs: Presentation, photos: Sequence[Tuple[str, bytes]], slide_it
     _set_bg(slide)
     _add_content_header(slide, f"3) 현장 사진{suffix}", "03", "현장 사진")
     page_photos = photos[page_index * 6 : (page_index + 1) * 6]
+    if not page_photos:
+        return
     left, top, gap_x, gap_y = 0.62, 1.4, 0.14, 0.14
     box_w = (12.08 - gap_x * 2) / 3
     box_h = (5.25 - gap_y) / 2
-    for idx in range(6):
+    for idx, (name, data) in enumerate(page_photos[:6]):
         row, col = divmod(idx, 3)
         x = left + col * (box_w + gap_x)
         y = top + row * (box_h + gap_y)
@@ -452,17 +498,13 @@ def _add_photos(prs: Presentation, photos: Sequence[Tuple[str, bytes]], slide_it
         bg.fill.solid()
         bg.fill.fore_color.rgb = RGBColor(241, 241, 241)
         bg.line.color.rgb = LINE
-        if idx >= len(page_photos):
-            _add_text(slide, "사진", Inches(x), Inches(y), Inches(box_w), Inches(box_h), 11, False, RGBColor(170, 170, 170), PP_ALIGN.CENTER)
-            continue
-        name, data = page_photos[idx]
         try:
             pw, ph = _fit_image(data, box_w, box_h)
             px = x + (box_w - pw) / 2
             py = y + (box_h - ph) / 2
             slide.shapes.add_picture(io.BytesIO(data), Inches(px), Inches(py), Inches(pw), Inches(ph))
         except Exception:
-            _add_text(slide, name, Inches(x + 0.1), Inches(y + 0.1), Inches(box_w - 0.2), Inches(box_h - 0.2), 9, False, MUTED, PP_ALIGN.CENTER)
+            _add_text(slide, name, Inches(x + 0.1), Inches(y + 0.1), Inches(box_w - 0.2), Inches(box_h - 0.2), 10.5, False, MUTED, PP_ALIGN.CENTER)
 
 
 def _add_thanks(prs: Presentation) -> None:

@@ -27,11 +27,13 @@ st.markdown(
       .block-container {padding-top: 1.25rem; padding-bottom: 2rem; max-width: 1800px;}
       .app-title {font-size:2rem; font-weight:800; margin-bottom:.2rem; color:#ED702C;}
       .app-sub {color:#6b7280; margin-bottom:1.1rem;}
-      .panel-title {font-size:1.25rem; font-weight:800; margin-bottom:.6rem;}
+      .panel-title {font-size:1.45rem; font-weight:800; margin-bottom:.65rem;}
       div[data-testid="stFileUploader"] {border:1px solid #d9e1e8; border-radius:12px; padding:.4rem .8rem;}
       .status-card {background:#fff7f2; border:1px solid #f3d3c1; border-radius:10px; padding:.8rem 1rem; margin:.4rem 0 1rem;}
-      .small-muted {font-size:.85rem; color:#6b7280;}
+      .small-muted {font-size:1rem; color:#6b7280;}
       div[data-testid="stVerticalBlockBorderWrapper"] {border-radius:14px;}
+      .stNumberInput label, .stSelectbox label, .stCheckbox label, .stFileUploader label {font-size:1.08rem !important; font-weight:700 !important;}
+      .stDataFrame, .stDataEditor {font-size:1.05rem;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -61,18 +63,10 @@ def _photo_payload() -> List[Tuple[str, bytes]]:
 
 
 def _render_basic_editor(report: ReportData) -> None:
+    # 표지에서 실제로 보이는 항목만 노출합니다.
     report.company_name = live_text("회사 이름", report.company_name, key="field_company_name")
     report.course_name = live_text("교육 과정명", report.course_name, key="field_course_name")
-    report.report_title = live_text("보고서 이름", report.report_title, key="field_report_title")
     report.schedule = live_text("교육 일정", report.schedule, key="field_schedule")
-    instructor_text = live_text(
-        "강사명 · 직책 (줄바꿈으로 구분)",
-        "\n".join(report.instructors),
-        key="field_instructors",
-        multiline=True,
-        height=110,
-    )
-    report.instructors = [v.strip() for v in instructor_text.splitlines() if v.strip()]
 
 def _render_overview_editor(report: ReportData) -> None:
     report.course_name = live_text("과정명", report.course_name, key="field_course_name")
@@ -151,17 +145,23 @@ def _render_survey_structure_editor(report: ReportData) -> None:
 def _render_summary_editor(report: ReportData) -> None:
     left, right = st.columns(2)
     with left:
-        total = st.number_input("총 수강인원 (0은 미입력)", min_value=0, value=int(report.total_participants or 0), step=1, key="field_total_participants")
+        total = st.number_input(
+            "총 수강인원 (0은 미입력)",
+            min_value=0,
+            value=int(report.total_participants or 0),
+            step=1,
+            key="field_total_participants",
+        )
         report.total_participants = int(total) if total else None
     with right:
-        report.response_count = st.number_input("응답자 수", min_value=0, value=int(report.response_count), step=1, key="field_response_count")
-    st.caption("평균 점수는 각 객관식 장표에서 응답 수를 수정하면 자동으로 다시 계산됩니다.")
-    st.dataframe(
-        [{"항목": q.section_label, "문항": q.question, "평균": q.average, "유효 응답": q.valid_responses} for q in report.objective_questions],
-        use_container_width=True,
-        hide_index=True,
-    )
-
+        report.response_count = st.number_input(
+            "응답자 수",
+            min_value=0,
+            value=int(report.response_count),
+            step=1,
+            key="field_response_count",
+        )
+    st.caption("문항별 평균은 각 객관식 결과 장표의 응답 분포를 수정하면 자동으로 다시 계산됩니다.")
 
 def _render_objective_editor(report: ReportData, q_index: int) -> None:
     q = report.objective_questions[q_index]
@@ -187,6 +187,7 @@ def _render_objective_editor(report: ReportData, q_index: int) -> None:
 
 def _render_subjective_editor(report: ReportData, q_index: int) -> None:
     q = report.subjective_questions[q_index]
+    original_answers = list(q.answers)
     q.section_label = live_text("항목명", q.section_label, key=f"subj_section_{q.id}")
     q.question = live_text(
         "문항 내용",
@@ -208,6 +209,13 @@ def _render_subjective_editor(report: ReportData, q_index: int) -> None:
     if remove_none:
         answers = [answer for answer in answers if not is_no_opinion(answer)]
     q.answers = answers
+    if q.answers != original_answers:
+        # The slide plan is built before the editor is drawn. Rerun once after
+        # applying subjective edits so continuation pages and the preview use
+        # the exact same answer list immediately.
+        st.session_state.report = report
+        st.session_state.ppt_bytes = None
+        st.rerun()
     st.caption(f"현재 유효 응답 {len(q.answers)}건 · 한 장당 최대 5건씩 자동 분할됩니다.")
 
 def _render_photo_editor() -> None:
@@ -225,7 +233,20 @@ def _render_photo_editor() -> None:
         st.write([name for name, _ in photos])
 
 
-def _render_editor(report: ReportData, slide) -> None:
+def _render_editor(report: ReportData, slide) -> bool:
+    editable_kinds = {
+        "cover",
+        "overview",
+        "curriculum",
+        "survey_structure",
+        "summary",
+        "objective",
+        "subjective",
+        "photos",
+    }
+    if slide.kind not in editable_kinds:
+        return False
+
     st.markdown(f'<div class="panel-title">입력 설정 · {slide.title}</div>', unsafe_allow_html=True)
     if slide.kind == "cover":
         _render_basic_editor(report)
@@ -243,9 +264,7 @@ def _render_editor(report: ReportData, slide) -> None:
         _render_subjective_editor(report, slide.payload["question_index"])
     elif slide.kind == "photos":
         _render_photo_editor()
-    else:
-        st.info("이 장표는 표준 고정 장표입니다. 입력값을 수정할 필요가 없습니다.")
-
+    return True
 
 def _sync_slide_jump() -> None:
     selected_id = st.session_state.get("slide_jump_id")
@@ -358,39 +377,45 @@ with nav_select:
     )
 
 current_slide = plan[current_index]
-left, right = st.columns([0.42, 0.58], gap="large")
-with left:
-    with st.container(border=True):
-        _render_editor(report, current_slide)
-with right:
-    st.markdown('<div class="panel-title">출력 미리보기</div>', unsafe_allow_html=True)
+editable_kinds = {"cover", "overview", "curriculum", "survey_structure", "summary", "objective", "subjective", "photos"}
 
-    # st.markdown()은 줄 앞 공백이 있는 HTML을 Markdown 코드 블록(<pre>)으로
-    # 해석할 수 있습니다. 미리보기는 독립 HTML 컴포넌트로 렌더링하여
-    # 소스 코드가 아니라 실제 16:9 슬라이드 화면을 표시합니다.
-    preview_document = f"""
-    <!doctype html>
-    <html lang="ko">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <style>
-          html, body {{
-            margin: 0;
-            padding: 0;
-            background: transparent;
-            overflow: hidden;
-          }}
-          * {{ box-sizing: border-box; }}
-        </style>
-        {PREVIEW_CSS}
-      </head>
-      <body>
-        {render_slide_html(report, current_slide, photo_names)}
-      </body>
-    </html>
-    """
-    components.html(preview_document, height=610, scrolling=False)
+# st.markdown()은 줄 앞 공백이 있는 HTML을 Markdown 코드 블록(<pre>)으로
+# 해석할 수 있습니다. 미리보기는 독립 HTML 컴포넌트로 렌더링하여
+# 소스 코드가 아니라 실제 16:9 슬라이드 화면을 표시합니다.
+preview_document = f"""
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html, body {{
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+      }}
+      * {{ box-sizing: border-box; }}
+    </style>
+    {PREVIEW_CSS}
+  </head>
+  <body>
+    {render_slide_html(report, current_slide, photo_names)}
+  </body>
+</html>
+"""
+
+if current_slide.kind in editable_kinds:
+    left, right = st.columns([0.42, 0.58], gap="large")
+    with left:
+        with st.container(border=True):
+            _render_editor(report, current_slide)
+    with right:
+        st.markdown('<div class="panel-title">출력 미리보기</div>', unsafe_allow_html=True)
+        components.html(preview_document, height=610, scrolling=False)
+else:
+    st.markdown('<div class="panel-title">출력 미리보기</div>', unsafe_allow_html=True)
+    components.html(preview_document, height=690, scrolling=False)
 
 st.session_state.report = report
 
@@ -414,4 +439,4 @@ with action_right:
         use_container_width=True,
     )
 
-st.caption("v1.2: 멀티캠퍼스 주황색 결과보고서 UI를 HTML 미리보기와 편집 가능한 PPTX에 동일하게 적용합니다.")
+st.caption("v1.4: 표지 괄호 제거, 실제 반영 입력만 노출, 글자 크기 및 객관식 문항 레이아웃 개선, 공식 로고 적용")
