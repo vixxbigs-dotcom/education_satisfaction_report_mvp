@@ -1,4 +1,5 @@
 # 📊 교육만족도 결과보고서 생성기 (Beta)
+🌍 https://educationsatisfactionreportmvp-tdhju6x2yaawphxhcmxg2b.streamlit.app/
 
 엑셀 설문 데이터를 분석해  
 교육 결과보고서 PPT를 자동으로 생성하는 Streamlit 웹앱입니다.
