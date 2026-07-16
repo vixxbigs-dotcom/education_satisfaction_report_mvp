@@ -16,7 +16,7 @@ from src.slide_plan import build_slide_plan
 
 
 st.set_page_config(
-    page_title="교육만족도 결과보고서 생성기 (Beta)",
+    page_title="교육만족도 결과보고서 생성기 V2 (Beta)",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -87,7 +87,7 @@ st.markdown(
 
 
 def _clear_editor_state() -> None:
-    prefixes = ("field_", "obj_", "subj_", "live_", "curriculum_editor", "survey_structure_editor", "photo_uploader")
+    prefixes = ("field_", "obj_", "choice_", "subj_", "insight_", "live_", "curriculum_editor", "survey_structure_editor", "photo_uploader")
     for key in list(st.session_state.keys()):
         if key.startswith(prefixes):
             st.session_state.pop(key, None)
@@ -164,13 +164,17 @@ def _render_curriculum_editor(report: ReportData) -> None:
 def _render_survey_structure_editor(report: ReportData) -> None:
     rows = []
     for q in report.objective_questions:
-        rows.append({"type": "객관식", "section": q.section_label, "question": q.question, "id": q.id})
+        scale = f"{q.scale_min}~{q.scale_max}점"
+        rows.append({"type": f"척도형 ({scale})", "section": q.section_label, "question": q.question, "id": q.id})
+    for q in report.choice_questions:
+        label = "단일선택" if q.selection_type == "single" else "복수선택"
+        rows.append({"type": label, "section": q.section_label, "question": q.question, "id": q.id})
     for q in report.subjective_questions:
         rows.append({"type": "주관식", "section": q.section_label, "question": q.question, "id": q.id})
     edited = st.data_editor(
         rows,
         column_config={
-            "type": st.column_config.TextColumn("유형", disabled=True, width="small"),
+            "type": st.column_config.TextColumn("유형", disabled=True, width="medium"),
             "section": st.column_config.TextColumn("항목", width="medium"),
             "question": st.column_config.TextColumn("문항", width="large"),
             "id": None,
@@ -179,10 +183,9 @@ def _render_survey_structure_editor(report: ReportData) -> None:
         hide_index=True,
         key="survey_structure_editor",
     )
-    objective_map = {q.id: q for q in report.objective_questions}
-    subjective_map = {q.id: q for q in report.subjective_questions}
+    all_maps = {q.id: q for q in report.objective_questions + report.choice_questions + report.subjective_questions}
     for row in edited:
-        target = objective_map.get(row["id"]) or subjective_map.get(row["id"])
+        target = all_maps.get(row["id"])
         if target:
             target.section_label = str(row["section"] or "").strip()
             target.question = str(row["question"] or "").strip()
@@ -192,84 +195,107 @@ def _render_summary_editor(report: ReportData) -> None:
     left, right = st.columns(2)
     with left:
         total = st.number_input(
-            "총 수강인원 (0은 미입력)",
-            min_value=0,
-            value=int(report.total_participants or 0),
-            step=1,
+            "총 수강인원 (0은 미입력)", min_value=0, value=int(report.total_participants or 0), step=1,
             key="field_total_participants",
         )
         report.total_participants = int(total) if total else None
     with right:
         report.response_count = st.number_input(
-            "응답자 수",
-            min_value=0,
-            value=int(report.response_count),
-            step=1,
-            key="field_response_count",
+            "응답자 수", min_value=0, value=int(report.response_count), step=1, key="field_response_count",
         )
-    st.caption("문항별 평균은 각 객관식 결과 장표의 응답 분포를 수정하면 자동으로 다시 계산됩니다.")
+    st.caption("서로 다른 척도는 별도 요약 장표로 자동 분리됩니다.")
+
 
 def _render_objective_editor(report: ReportData, q_index: int) -> None:
     q = report.objective_questions[q_index]
     q.section_label = live_text("항목명", q.section_label, key=f"obj_section_{q.id}")
-    q.question = live_text(
-        "문항 내용",
-        q.question,
-        key=f"obj_question_{q.id}",
-        multiline=True,
-        height=100,
+    q.question = live_text("문항 내용", q.question, key=f"obj_question_{q.id}", multiline=True, height=100)
+    st.caption(f"자동 인식 척도: {q.scale_min}~{q.scale_max}점 · 평균은 응답 분포를 기준으로 계산됩니다.")
+    rows = [
+        {"score": score, "label": label, "count": int(count)}
+        for score, label, count in zip(q.scale_values, q.scale_labels, q.counts)
+    ]
+    edited = st.data_editor(
+        rows,
+        column_config={
+            "score": st.column_config.NumberColumn("점수", disabled=True, width="small"),
+            "label": st.column_config.TextColumn("표시명", width="medium"),
+            "count": st.column_config.NumberColumn("응답 수", min_value=0, step=1, width="small"),
+        },
+        hide_index=True,
+        use_container_width=True,
+        key=f"obj_distribution_{q.id}",
     )
-    st.markdown("**응답 분포**")
-    columns = st.columns(len(q.scale_labels))
-    new_counts = []
-    for idx, (column, label, count) in enumerate(zip(columns, q.scale_labels, q.counts)):
-        with column:
-            new_counts.append(
-                st.number_input(label, min_value=0, value=int(count), step=1, key=f"obj_count_{q.id}_{idx}")
-            )
-    q.counts = [int(v) for v in new_counts]
+    q.scale_values = [int(row["score"]) for row in edited]
+    q.scale_labels = [str(row["label"] or f"{row['score']}점") for row in edited]
+    q.counts = [max(0, int(row["count"] or 0)) for row in edited]
     q.recalculate()
     st.info(f"재계산 평균: **{q.average:.2f}점** · 유효 응답: **{q.valid_responses}명**")
+
+
+def _render_choice_editor(report: ReportData, q_index: int) -> None:
+    q = report.choice_questions[q_index]
+    q.section_label = live_text("항목명", q.section_label, key=f"choice_section_{q.id}")
+    q.question = live_text("문항 내용", q.question, key=f"choice_question_{q.id}", multiline=True, height=95)
+    type_label = "단일선택 · 원형그래프" if q.selection_type == "single" else "복수선택 · 가로막대그래프"
+    st.caption(f"자동 인식 유형: {type_label}")
+    rows = [
+        {"option": option, "count": int(count)}
+        for option, count in zip(q.options, q.counts)
+    ]
+    edited = st.data_editor(
+        rows,
+        column_config={
+            "option": st.column_config.TextColumn("선택지", width="large"),
+            "count": st.column_config.NumberColumn("응답 수", min_value=0, step=1, width="small"),
+        },
+        num_rows="dynamic",
+        hide_index=True,
+        use_container_width=True,
+        key=f"choice_distribution_{q.id}",
+    )
+    q.options = [str(row["option"] or "").strip() for row in edited if str(row["option"] or "").strip()]
+    q.counts = [max(0, int(row["count"] or 0)) for row in edited if str(row["option"] or "").strip()]
+    q.recalculate()
+    st.info(f"유효 응답자: **{q.valid_responses}명** · 선택지: **{len(q.options)}개**")
+
 
 def _render_subjective_editor(report: ReportData, q_index: int) -> None:
     q = report.subjective_questions[q_index]
     original_answers = list(q.answers)
     q.section_label = live_text("항목명", q.section_label, key=f"subj_section_{q.id}")
-    q.question = live_text(
-        "문항 내용",
-        q.question,
-        key=f"subj_question_{q.id}",
-        multiline=True,
-        height=90,
-    )
+    q.question = live_text("문항 내용", q.question, key=f"subj_question_{q.id}", multiline=True, height=90)
     remove_none = st.checkbox("'없음'류 응답 제외", value=q.category == "subjective_bad", key=f"subj_filter_{q.id}")
     answer_text = live_text(
-        "응답 내용 (한 줄에 한 응답)",
-        "\n".join(q.answers),
-        key=f"subj_answers_{q.id}",
-        multiline=True,
-        height=330,
-        debounce=280,
+        "응답 내용 (한 줄에 한 응답)", "\n".join(q.answers), key=f"subj_answers_{q.id}",
+        multiline=True, height=330, debounce=280,
     )
     answers = [line.strip() for line in answer_text.splitlines() if line.strip()]
     if remove_none:
         answers = [answer for answer in answers if not is_no_opinion(answer)]
     q.answers = answers
     if q.answers != original_answers:
-        # The slide plan is built before the editor is drawn. Rerun once after
-        # applying subjective edits so continuation pages and the preview use
-        # the exact same answer list immediately.
         st.session_state.report = report
         st.session_state.ppt_bytes = None
         st.rerun()
     st.caption(f"현재 유효 응답 {len(q.answers)}건 · 한 장당 최대 5건씩 자동 분할됩니다.")
 
+
+def _render_insights_editor(report: ReportData) -> None:
+    original = list(report.insights)
+    text = live_text(
+        "종합 시사점 (한 줄에 한 항목)", "\n".join(report.insights), key="insight_items",
+        multiline=True, height=280, debounce=280,
+    )
+    report.insights = [line.strip() for line in text.splitlines() if line.strip()][:4]
+    if report.insights != original:
+        st.session_state.ppt_bytes = None
+    st.caption("최대 4개 항목을 장표에 표시합니다. 자동 생성 문구를 현업 관점에 맞게 수정할 수 있습니다.")
+
+
 def _render_photo_editor() -> None:
     uploaded = st.file_uploader(
-        "현장 사진 업로드",
-        type=["png", "jpg", "jpeg", "webp"],
-        accept_multiple_files=True,
-        key="photo_uploader",
+        "현장 사진 업로드", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True, key="photo_uploader",
     )
     if uploaded:
         st.session_state.photos = [(file.name, file.getvalue()) for file in uploaded]
@@ -281,36 +307,24 @@ def _render_photo_editor() -> None:
 
 def _render_editor(report: ReportData, slide) -> bool:
     editable_kinds = {
-        "cover",
-        "overview",
-        "curriculum",
-        "survey_structure",
-        "summary",
-        "objective",
-        "subjective",
-        "photos",
+        "cover", "overview", "curriculum", "survey_structure", "summary", "objective",
+        "choice", "subjective", "insights", "photos",
     }
     if slide.kind not in editable_kinds:
         return False
-
     st.markdown(f'<div class="panel-title">입력 설정 · {slide.title}</div>', unsafe_allow_html=True)
-    if slide.kind == "cover":
-        _render_basic_editor(report)
-    elif slide.kind == "overview":
-        _render_overview_editor(report)
-    elif slide.kind == "curriculum":
-        _render_curriculum_editor(report)
-    elif slide.kind == "survey_structure":
-        _render_survey_structure_editor(report)
-    elif slide.kind == "summary":
-        _render_summary_editor(report)
-    elif slide.kind == "objective":
-        _render_objective_editor(report, slide.payload["question_index"])
-    elif slide.kind == "subjective":
-        _render_subjective_editor(report, slide.payload["question_index"])
-    elif slide.kind == "photos":
-        _render_photo_editor()
+    if slide.kind == "cover": _render_basic_editor(report)
+    elif slide.kind == "overview": _render_overview_editor(report)
+    elif slide.kind == "curriculum": _render_curriculum_editor(report)
+    elif slide.kind == "survey_structure": _render_survey_structure_editor(report)
+    elif slide.kind == "summary": _render_summary_editor(report)
+    elif slide.kind == "objective": _render_objective_editor(report, slide.payload["question_index"])
+    elif slide.kind == "choice": _render_choice_editor(report, slide.payload["question_index"])
+    elif slide.kind == "subjective": _render_subjective_editor(report, slide.payload["question_index"])
+    elif slide.kind == "insights": _render_insights_editor(report)
+    elif slide.kind == "photos": _render_photo_editor()
     return True
+
 
 def _sync_slide_jump() -> None:
     selected_id = st.session_state.get("slide_jump_id")
@@ -318,8 +332,8 @@ def _sync_slide_jump() -> None:
         st.session_state.slide_id = selected_id
 
 
-st.markdown('<div class="app-title">교육만족도 결과보고서 생성기 (Beta)</div>', unsafe_allow_html=True)
-st.markdown('<div class="app-sub">엑셀을 업로드하면 분석 결과가 자동 입력되고, 장표별로 수정하면서 PPT를 생성할 수 있습니다.</div>', unsafe_allow_html=True)
+st.markdown('<div class="app-title">교육만족도 결과보고서 생성기 V2 (Beta)</div>', unsafe_allow_html=True)
+st.markdown('<div class="app-sub">다강사·5/7/10점 척도·구글폼·선택형 문항을 자동 분석하고 편집 가능한 PPT를 생성합니다.</div>', unsafe_allow_html=True)
 
 sample_files = _available_sample_files()
 input_col, resource_col, reset_col = st.columns([6.4, 2.3, 1.1])
@@ -448,7 +462,7 @@ with st.expander("자동 분석 결과 및 확인 사항", expanded=False):
         <div class="status-card">
           <b>파일:</b> {report.source_filename}<br/>
           <b>응답자:</b> {report.response_count}명<br/>
-          <b>객관식:</b> {len(report.objective_questions)}문항 · <b>주관식:</b> {len(report.subjective_questions)}문항<br/>
+          <b>척도형:</b> {len(report.objective_questions)}문항 · <b>선택형:</b> {len(report.choice_questions)}문항 · <b>주관식:</b> {len(report.subjective_questions)}문항<br/>
           <b>강사:</b> {', '.join(report.instructors) if report.instructors else '미추출'}
         </div>
         """,
@@ -485,7 +499,7 @@ with nav_select:
     )
 
 current_slide = plan[current_index]
-editable_kinds = {"cover", "overview", "curriculum", "survey_structure", "summary", "objective", "subjective", "photos"}
+editable_kinds = {"cover", "overview", "curriculum", "survey_structure", "summary", "objective", "choice", "subjective", "insights", "photos"}
 
 # st.markdown()은 줄 앞 공백이 있는 HTML을 Markdown 코드 블록(<pre>)으로
 # 해석할 수 있습니다. 미리보기는 독립 HTML 컴포넌트로 렌더링하여
@@ -707,4 +721,4 @@ with action_right:
         use_container_width=True,
     )
 
-st.caption("v1.8 Beta: 직접 업로드·샘플 로우데이터 선택, 엑셀/PPT 템플릿 다운로드")
+st.caption("V2 Beta: 다강사·혼합 척도·구글폼·단일/복수선택 자동 분석 및 편집 가능한 PPT 생성")
