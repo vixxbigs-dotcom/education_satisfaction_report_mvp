@@ -1,0 +1,23 @@
+{
+  "default_font": "nanum_square",
+  "fonts": {
+    "nanum_square": {
+      "display_name": "나눔스퀘어",
+      "ppt_font_name": "나눔스퀘어",
+      "regular_file": "NanumSquareR.ttf",
+      "bold_file": "NanumSquareB.ttf"
+    },
+    "nanum_gothic": {
+      "display_name": "나눔고딕",
+      "ppt_font_name": "나눔고딕",
+      "regular_file": "NanumGothic.ttf",
+      "bold_file": "NanumGothicBold.ttf"
+    },
+    "malgun_gothic": {
+      "display_name": "맑은 고딕",
+      "ppt_font_name": "맑은 고딕",
+      "regular_file": "",
+      "bold_file": ""
+    }
+  }
+}

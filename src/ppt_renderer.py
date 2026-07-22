@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import math
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
@@ -14,6 +15,7 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
+from .font_manager import get_ppt_font_name
 from .models import ChoiceQuestion, ObjectiveQuestion, ReportData
 from .slide_plan import SlideItem, build_slide_plan
 from .text_utils import strip_leading_question_numbers
@@ -33,7 +35,11 @@ PURPLE = RGBColor(160, 43, 152)
 BLUE = RGBColor(27, 159, 208)
 GREEN = RGBColor(88, 169, 140)
 GOLD = RGBColor(201, 161, 59)
-FONT = "맑은 고딕"
+_ACTIVE_FONT = ContextVar("education_report_ppt_font", default=get_ppt_font_name())
+
+
+def _current_font() -> str:
+    return _ACTIVE_FONT.get()
 PALETTE = [ORANGE, PURPLE, BLUE, RGBColor(243, 154, 102), RGBColor(124, 141, 181), GREEN, GOLD, RGBColor(155, 155, 155)]
 ASSET_DIR = Path(__file__).resolve().parent.parent / "assets"
 SECTION_BACKGROUND = ASSET_DIR / "multicampus_section_background.png"
@@ -47,14 +53,14 @@ def _set_bg(slide, color=WHITE):
 
 
 def _add_text(slide, text, x, y, w, h, size=16, bold=False, color=DARK, align=PP_ALIGN.LEFT,
-              valign=MSO_ANCHOR.MIDDLE, margin=0.03, font_name=FONT):
+              valign=MSO_ANCHOR.MIDDLE, margin=0.03, font_name=None):
     box = slide.shapes.add_textbox(x, y, w, h)
     tf = box.text_frame; tf.clear(); tf.word_wrap = True
     tf.margin_left = Inches(margin); tf.margin_right = Inches(margin); tf.margin_top = Inches(margin); tf.margin_bottom = Inches(margin)
     tf.vertical_anchor = valign
     p = tf.paragraphs[0]; p.alignment = align
     run = p.add_run(); run.text = str(text or "")
-    run.font.name = font_name; run.font.size = Pt(size); run.font.bold = bold; run.font.color.rgb = color
+    run.font.name = font_name or _current_font(); run.font.size = Pt(size); run.font.bold = bold; run.font.color.rgb = color
     return box
 
 
@@ -97,7 +103,7 @@ def _style_table(table, header=True, first_col_gray=False, first_col_orange=Fals
             for p in cell.text_frame.paragraphs:
                 p.alignment = PP_ALIGN.CENTER if is_orange else PP_ALIGN.LEFT
                 for run in p.runs:
-                    run.font.name = FONT; run.font.size = Pt(header_font_size if is_header else body_font_size)
+                    run.font.name = _current_font(); run.font.size = Pt(header_font_size if is_header else body_font_size)
                     run.font.color.rgb = WHITE if (is_header or is_orange) else DARK
                     run.font.bold = is_header or is_orange or is_gray
 
@@ -111,11 +117,14 @@ def _apply_table_row_heights(table, heights: Sequence[float]) -> None:
 def _add_cover(prs, report):
     slide = prs.slides.add_slide(prs.slide_layouts[6]); _add_full_background(slide)
     if report.company_name:
-        _add_text(slide, report.company_name, Inches(6.9), Inches(2.18), Inches(5.25), Inches(0.36), 12, False, MUTED)
-    _add_text(slide, report.course_name or "과정 이름", Inches(6.88), Inches(3.08), Inches(5.4), Inches(0.55), 29, True, ORANGE, valign=MSO_ANCHOR.BOTTOM)
-    _add_text(slide, "결과보고서", Inches(6.88), Inches(3.62), Inches(5.4), Inches(0.58), 31, True, ORANGE, valign=MSO_ANCHOR.TOP)
+        _add_text(slide, report.company_name, Inches(6.9), Inches(1.98), Inches(5.25), Inches(0.36), 12, False, MUTED)
+    label = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(6.88), Inches(2.48), Inches(1.42), Inches(0.38))
+    label.fill.solid(); label.fill.fore_color.rgb = DARK; label.line.fill.background()
+    _add_text(slide, report.cover_top_label or "결과보고서", Inches(6.90), Inches(2.49), Inches(1.38), Inches(0.34), 10.5, True, WHITE, PP_ALIGN.CENTER)
+    _add_text(slide, report.cover_title1 or report.course_name or "과정 이름", Inches(6.88), Inches(3.08), Inches(5.4), Inches(0.55), 29, True, ORANGE, valign=MSO_ANCHOR.BOTTOM)
+    _add_text(slide, report.cover_title2 or "결과보고서", Inches(6.88), Inches(3.62), Inches(5.4), Inches(0.68), 31, True, ORANGE, valign=MSO_ANCHOR.TOP)
     if report.schedule:
-        _add_text(slide, report.schedule, Inches(6.9), Inches(4.55), Inches(4.8), Inches(0.32), 11, False, MUTED)
+        _add_text(slide, report.schedule, Inches(6.9), Inches(4.58), Inches(4.8), Inches(0.32), 11, False, MUTED)
 
 
 def _add_toc(prs):
@@ -184,7 +193,10 @@ def _add_survey_structure(prs, report, item):
 
 
 def _summary_label(q):
-    if q.instructor_name: return f"{q.instructor_name}\n{q.instructor_metric or '만족도'}"
+    if q.summary_label:
+        return q.summary_label
+    if q.instructor_name:
+        return f"{q.instructor_name}\n{q.instructor_metric or '만족도'}"
     return q.section_label
 
 
@@ -351,10 +363,10 @@ def _add_objective_histogram(slide, q):
     chart = slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(1.05), Inches(2.05), Inches(11.25), Inches(4.35), chart_data).chart
     chart.has_legend = False; chart.has_title = False
     chart.value_axis.minimum_scale = 0; chart.value_axis.has_major_gridlines = True
-    chart.category_axis.tick_labels.font.name = FONT; chart.category_axis.tick_labels.font.size = Pt(10)
-    chart.value_axis.tick_labels.font.name = FONT; chart.value_axis.tick_labels.font.size = Pt(9)
+    chart.category_axis.tick_labels.font.name = _current_font(); chart.category_axis.tick_labels.font.size = Pt(10)
+    chart.value_axis.tick_labels.font.name = _current_font(); chart.value_axis.tick_labels.font.size = Pt(9)
     series = chart.series[0]; series.format.fill.solid(); series.format.fill.fore_color.rgb = ORANGE; series.format.line.fill.background()
-    series.has_data_labels = True; labels = series.data_labels; labels.position = XL_LABEL_POSITION.OUTSIDE_END; labels.font.name = FONT; labels.font.size = Pt(9); labels.font.color.rgb = DARK
+    series.has_data_labels = True; labels = series.data_labels; labels.position = XL_LABEL_POSITION.OUTSIDE_END; labels.font.name = _current_font(); labels.font.size = Pt(9); labels.font.color.rgb = DARK
 
 
 def _add_objective(prs, report, item):
@@ -417,8 +429,8 @@ def _add_single_choice(prs, q: ChoiceQuestion, order: int):
     data = ChartData(); data.categories = q.options; data.add_series("응답", q.counts)
     chart = slide.shapes.add_chart(XL_CHART_TYPE.PIE, Inches(.85), Inches(1.9), Inches(5.3), Inches(4.65), data).chart
     chart.has_legend = True; chart.legend.position = XL_LEGEND_POSITION.RIGHT; chart.legend.include_in_layout = False
-    chart.legend.font.name = FONT; chart.legend.font.size = Pt(10)
-    series = chart.series[0]; series.has_data_labels = True; labels = series.data_labels; labels.show_percentage = True; labels.show_category_name = False; labels.position = XL_LABEL_POSITION.BEST_FIT; labels.font.name = FONT; labels.font.size = Pt(9)
+    chart.legend.font.name = _current_font(); chart.legend.font.size = Pt(10)
+    series = chart.series[0]; series.has_data_labels = True; labels = series.data_labels; labels.show_percentage = True; labels.show_category_name = False; labels.position = XL_LABEL_POSITION.BEST_FIT; labels.font.name = _current_font(); labels.font.size = Pt(9)
     for idx, point in enumerate(series.points):
         point.format.fill.solid(); point.format.fill.fore_color.rgb = PALETTE[idx % len(PALETTE)]
     y = 2.0
@@ -465,7 +477,7 @@ def _add_subjective(prs, report, item):
     size = _subjective_font_size(answers)
     for idx, answer in enumerate(answers):
         p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph(); p.alignment = PP_ALIGN.LEFT; p.space_after = Pt(6); p.line_spacing = 1.18
-        run = p.add_run(); run.text = f"-  {answer}"; run.font.name = FONT; run.font.size = Pt(size); run.font.color.rgb = DARK
+        run = p.add_run(); run.text = f"-  {answer}"; run.font.name = _current_font(); run.font.size = Pt(size); run.font.color.rgb = DARK
 
 
 def _add_insights(prs, report):
@@ -501,22 +513,36 @@ def _add_thanks(prs):
     slide = prs.slides.add_slide(prs.slide_layouts[6]); _add_full_background(slide); _add_text(slide, "THANK YOU", Inches(6.88), Inches(3.08), Inches(5.1), Inches(.65), 34, True, ORANGE); _add_text(slide, "감사합니다", Inches(6.9), Inches(3.78), Inches(4.8), Inches(.38), 16, True, ORANGE)
 
 
-def generate_pptx(report: ReportData, photos: Sequence[Tuple[str, bytes]] | None = None) -> bytes:
-    photos = photos or []; prs = Presentation(); prs.slide_width = SLIDE_W; prs.slide_height = SLIDE_H
-    while len(prs.slides): prs.slides._sldIdLst.remove(prs.slides._sldIdLst[0])
-    for item in build_slide_plan(report, photo_count=len(photos)):
-        if item.kind == "cover": _add_cover(prs, report)
-        elif item.kind == "toc": _add_toc(prs)
-        elif item.kind == "section": _add_section(prs, item)
-        elif item.kind == "overview": _add_overview(prs, report)
-        elif item.kind == "curriculum": _add_curriculum(prs, report)
-        elif item.kind == "survey_structure": _add_survey_structure(prs, report, item)
-        elif item.kind == "summary": _add_summary(prs, report, item)
-        elif item.kind == "objective": _add_objective(prs, report, item)
-        elif item.kind == "lecturer_comparison": _add_lecturer_comparison(prs, report, item)
-        elif item.kind == "choice": _add_choice(prs, report, item)
-        elif item.kind == "subjective": _add_subjective(prs, report, item)
-        elif item.kind == "insights": _add_insights(prs, report)
-        elif item.kind == "photos": _add_photos(prs, photos, item)
-        elif item.kind == "thanks": _add_thanks(prs)
-    output = io.BytesIO(); prs.save(output); return output.getvalue()
+def generate_pptx(
+    report: ReportData,
+    photos: Sequence[Tuple[str, bytes]] | None = None,
+    font_key: str | None = None,
+) -> bytes:
+    token = _ACTIVE_FONT.set(get_ppt_font_name(font_key))
+    try:
+        photos = photos or []
+        prs = Presentation()
+        prs.slide_width = SLIDE_W
+        prs.slide_height = SLIDE_H
+        while len(prs.slides):
+            prs.slides._sldIdLst.remove(prs.slides._sldIdLst[0])
+        for item in build_slide_plan(report, photo_count=len(photos)):
+            if item.kind == "cover": _add_cover(prs, report)
+            elif item.kind == "toc": _add_toc(prs)
+            elif item.kind == "section": _add_section(prs, item)
+            elif item.kind == "overview": _add_overview(prs, report)
+            elif item.kind == "curriculum": _add_curriculum(prs, report)
+            elif item.kind == "survey_structure": _add_survey_structure(prs, report, item)
+            elif item.kind == "summary": _add_summary(prs, report, item)
+            elif item.kind == "objective": _add_objective(prs, report, item)
+            elif item.kind == "lecturer_comparison": _add_lecturer_comparison(prs, report, item)
+            elif item.kind == "choice": _add_choice(prs, report, item)
+            elif item.kind == "subjective": _add_subjective(prs, report, item)
+            elif item.kind == "insights": _add_insights(prs, report)
+            elif item.kind == "photos": _add_photos(prs, photos, item)
+            elif item.kind == "thanks": _add_thanks(prs)
+        output = io.BytesIO()
+        prs.save(output)
+        return output.getvalue()
+    finally:
+        _ACTIVE_FONT.reset(token)

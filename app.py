@@ -8,6 +8,12 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from src.excel_parser import is_no_opinion, parse_excel
+from src.font_manager import (
+    get_default_font_key,
+    get_font_presets,
+    get_preview_font_css,
+    get_preview_font_family,
+)
 from src.live_input import live_text
 from src.models import CurriculumRow, ReportData
 from src.ppt_renderer import generate_pptx
@@ -16,7 +22,7 @@ from src.slide_plan import build_slide_plan
 
 
 st.set_page_config(
-    page_title="교육만족도 결과보고서 생성기 V2 (Beta)",
+    page_title="교육만족도 결과보고서 생성기 V2.9 (Beta)",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -50,6 +56,10 @@ def _sample_display_name(filename: str) -> str:
 
 def _read_file_bytes(path: Path) -> bytes:
     return path.read_bytes() if path.exists() else b""
+
+
+def _invalidate_ppt() -> None:
+    st.session_state.pop("ppt_bytes", None)
 
 
 def _clear_loaded_report() -> None:
@@ -109,10 +119,16 @@ def _photo_payload() -> List[Tuple[str, bytes]]:
 
 
 def _render_basic_editor(report: ReportData) -> None:
-    # 표지에서 실제로 보이는 항목만 노출합니다.
-    report.company_name = live_text("회사 이름", report.company_name, key="field_company_name")
-    report.course_name = live_text("교육 과정명", report.course_name, key="field_course_name")
+    # 표지 관련 입력은 과정명 하나로 단순화합니다.
+    # 상단 라벨과 결과보고서 문구는 시스템 기본값으로 자동 적용됩니다.
+    report.course_name = live_text("과정명", report.course_name, key="field_course_name")
+    report.report_title = f"{report.course_name} 결과보고서" if report.course_name else "교육만족도 결과보고서"
+    report.cover_top_label = "결과보고서"
+    report.cover_title1 = report.course_name
+    report.cover_title2 = "결과보고서"
+    report.company_name = live_text("고객사명 (선택)", report.company_name, key="field_company_name")
     report.schedule = live_text("교육 일정", report.schedule, key="field_schedule")
+    st.caption("과정명만 입력하면 표지와 PPT 파일명이 ‘과정명 + 결과보고서’ 형식으로 자동 생성됩니다.")
 
 def _render_overview_editor(report: ReportData) -> None:
     report.course_name = live_text("과정명", report.course_name, key="field_course_name")
@@ -332,8 +348,27 @@ def _sync_slide_jump() -> None:
         st.session_state.slide_id = selected_id
 
 
-st.markdown('<div class="app-title">교육만족도 결과보고서 생성기 V2 (Beta)</div>', unsafe_allow_html=True)
-st.markdown('<div class="app-sub">다강사·5/7/10점 척도·구글폼·선택형 문항을 자동 분석하고 편집 가능한 PPT를 생성합니다.</div>', unsafe_allow_html=True)
+st.markdown('<div class="app-title">교육만족도 결과보고서 생성기 V2.9 (Beta)</div>', unsafe_allow_html=True)
+st.markdown('<div class="app-sub">원본 설문 엑셀과 표준 템플릿을 모두 지원하며, 다강사·혼합 척도·선택형 문항을 자동 분석합니다.</div>', unsafe_allow_html=True)
+
+font_presets = get_font_presets()
+default_font_key = get_default_font_key()
+if st.session_state.get("selected_font_key") not in font_presets:
+    st.session_state.selected_font_key = default_font_key
+
+# 별도 '출력 설정' 접기 영역 없이 글꼴 드롭다운만 바로 표시합니다.
+# assets/fonts에 실제로 들어 있는 폰트 파일명이 옵션으로 그대로 노출됩니다.
+font_col, font_spacer = st.columns([1.4, 4.6])
+with font_col:
+    selected_font_key = st.selectbox(
+        "웹 미리보기·PPT 글꼴",
+        options=list(font_presets.keys()),
+        format_func=lambda key: font_presets[key].get("display_name", key),
+        key="selected_font_key",
+        on_change=_invalidate_ppt,
+    )
+
+selected_font_key = st.session_state.selected_font_key
 
 sample_files = _available_sample_files()
 input_col, resource_col, reset_col = st.columns([6.4, 2.3, 1.1])
@@ -345,28 +380,34 @@ input_signature = None
 with input_col:
     input_mode = st.radio(
         "데이터 불러오기 방식",
-        ["직접 업로드", "샘플 로우데이터"],
+        ["원본 설문 엑셀 업로드", "표준 템플릿 업로드", "샘플 데이터"],
         horizontal=True,
         key="input_mode",
         on_change=_clear_loaded_report,
     )
-    if input_mode == "직접 업로드":
+    if input_mode in {"원본 설문 엑셀 업로드", "표준 템플릿 업로드"}:
+        is_template = input_mode == "표준 템플릿 업로드"
         uploaded_excel = st.file_uploader(
-            "설문 엑셀 업로드",
+            "작성한 표준 템플릿 업로드" if is_template else "구글폼·고객사 원본 설문 엑셀 업로드",
             type=["xlsx", "xlsm"],
-            key="excel_uploader",
+            key="template_excel_uploader" if is_template else "source_excel_uploader",
+            help=(
+                "다운로드한 만족도 조사 엑셀 템플릿의 기본정보와 설문응답 시트를 작성한 뒤 올려주세요."
+                if is_template
+                else "구글폼 응답 다운로드 파일이나 고객사에서 전달받은 원본 엑셀을 그대로 올려주세요."
+            ),
         )
         if uploaded_excel is not None:
             input_bytes = uploaded_excel.getvalue()
             input_filename = uploaded_excel.name
-            input_signature = f"upload:{uploaded_excel.name}:{uploaded_excel.size}"
+            mode_prefix = "template" if is_template else "source"
+            input_signature = f"{mode_prefix}:{uploaded_excel.name}:{uploaded_excel.size}"
     else:
         if sample_files:
             sample_names = [path.name for path in sample_files]
             selected_sample_name = st.selectbox(
-                "샘플 로우데이터 선택",
+                "샘플 데이터 선택",
                 options=sample_names,
-                format_func=_sample_display_name,
                 key="sample_raw_selector",
             )
             selected_sample = SAMPLE_DATA_DIR / selected_sample_name
@@ -504,6 +545,9 @@ editable_kinds = {"cover", "overview", "curriculum", "survey_structure", "summar
 # st.markdown()은 줄 앞 공백이 있는 HTML을 Markdown 코드 블록(<pre>)으로
 # 해석할 수 있습니다. 미리보기는 독립 HTML 컴포넌트로 렌더링하여
 # 소스 코드가 아니라 실제 16:9 슬라이드 화면을 표시합니다.
+selected_font_face_css = get_preview_font_css(selected_font_key, family_name="ReportSelectedFont")
+selected_font_family = get_preview_font_family(selected_font_key, family_name="ReportSelectedFont")
+
 preview_document = f"""
 <!doctype html>
 <html lang="ko">
@@ -520,6 +564,10 @@ preview_document = f"""
       * {{ box-sizing: border-box; }}
     </style>
     {PREVIEW_CSS}
+    <style>
+      {selected_font_face_css}
+      .ppt-slide {{ font-family: {selected_font_family} !important; }}
+    </style>
   </head>
   <body>
     {render_slide_html(report, current_slide, photo_names)}
@@ -707,7 +755,7 @@ with action_left:
     if st.button("PPT 생성 / 최신 내용 반영", type="primary", use_container_width=True):
         try:
             with st.spinner("편집 가능한 PPTX를 생성하고 있습니다..."):
-                st.session_state.ppt_bytes = generate_pptx(report, _photo_payload())
+                st.session_state.ppt_bytes = generate_pptx(report, _photo_payload(), font_key=selected_font_key)
             st.success("PPT 생성이 완료되었습니다.")
         except Exception as exc:
             st.error(f"PPT 생성 중 오류가 발생했습니다: {exc}")
@@ -721,4 +769,4 @@ with action_right:
         use_container_width=True,
     )
 
-st.caption("V2 Beta: 다강사·혼합 척도·구글폼·단일/복수선택 자동 분석 및 편집 가능한 PPT 생성")
+st.caption("V2.9 Beta: 웹 글꼴 선택·원본/표준 템플릿 이중 업로드·최소입력형 2개 시트·다강사 자동 반영")
