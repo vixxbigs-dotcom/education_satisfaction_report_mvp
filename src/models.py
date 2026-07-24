@@ -8,10 +8,9 @@ from typing import Any, Dict, List, Optional
 class ObjectiveQuestion:
     """Numeric/Likert scale question.
 
-    ``counts`` and ``scale_labels`` are always stored from high score to low
-    score for compatibility with the V1 horizontal distribution chart.
-    ``scale_values`` mirrors that order and removes the old assumption that
-    the number of labels is the score itself (important for 0~10 scales).
+    ``counts``, ``scale_labels`` and ``scale_values`` are stored from high
+    score to low score. ``instructor_slot`` links template columns such as
+    강사1/강사2 to the non-empty instructor list entered in the workbook.
     """
 
     id: str
@@ -30,6 +29,8 @@ class ObjectiveQuestion:
     scale_values: List[int] = field(default_factory=list)
     scale_type: str = "likert"
     instructor_metric: str = ""
+    summary_label: str = ""
+    instructor_slot: int = 0
 
     def __post_init__(self) -> None:
         if not self.scale_values:
@@ -112,6 +113,9 @@ class ReportData:
     subjective_questions: List[SubjectiveQuestion] = field(default_factory=list)
     insights: List[str] = field(default_factory=list)
     diagnostics: List[str] = field(default_factory=list)
+    cover_top_label: str = "결과보고서"
+    cover_title1: str = ""
+    cover_title2: str = "결과보고서"
 
     @property
     def response_rate(self) -> Optional[int]:
@@ -139,7 +143,10 @@ class ReportData:
 
 
 def objective_from_dict(data: Dict[str, Any]) -> ObjectiveQuestion:
-    q = ObjectiveQuestion(**data)
+    copied = dict(data)
+    copied.setdefault("summary_label", "")
+    copied.setdefault("instructor_slot", 0)
+    q = ObjectiveQuestion(**copied)
     q.recalculate()
     return q
 
@@ -165,4 +172,7 @@ def report_from_dict(data: Dict[str, Any]) -> ReportData:
     copied["subjective_questions"] = [subjective_from_dict(v) for v in data.get("subjective_questions", [])]
     copied["curriculum"] = [curriculum_from_dict(v) for v in data.get("curriculum", [])]
     copied.setdefault("insights", [])
+    copied.setdefault("cover_top_label", "결과보고서")
+    copied.setdefault("cover_title1", copied.get("course_name", ""))
+    copied.setdefault("cover_title2", "결과보고서")
     return ReportData(**copied)

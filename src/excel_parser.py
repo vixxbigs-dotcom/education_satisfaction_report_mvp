@@ -149,15 +149,19 @@ def _extract_module(text: str) -> str:
 
 
 def _normalize_instructor_name(candidate: str) -> str:
+    """Keep the display title because the PPT should show e.g. '설상훈 교수'."""
     candidate = _clean_text(candidate)
     candidate = re.sub(r"^.*?\]\s*", "", candidate)
     candidate = re.sub(r"^\d+\s*[.)]?\s*", "", candidate)
-    suffix = "|".join(map(re.escape, TITLE_SUFFIXES))
-    candidate = re.sub(rf"\s*(?:{suffix})$", "", candidate).strip()
     words = candidate.split()
-    if len(words) > 3:
-        candidate = " ".join(words[-2:])
+    if len(words) > 4:
+        candidate = " ".join(words[-3:])
     return candidate
+
+
+def _extract_instructor_slot(text: str) -> int:
+    match = re.search(r"(?:\{|\[)?강사\s*(10|[1-9])(?:\}|\])?", _clean_text(text))
+    return int(match.group(1)) if match else 0
 
 
 def _extract_instructor(text: str) -> str:
@@ -174,10 +178,10 @@ def _extract_instructor(text: str) -> str:
             return normalized
 
     # Frequent Google Forms phrasing: "윤영철 강사의 ..."
-    match = re.search(r"([가-힣A-Za-z]{2,12})\s*(?:강사|교수|코치)\s*의", text)
+    match = re.search(r"([가-힣A-Za-z]{2,12}\s*(?:강사|교수|코치))\s*의", text)
     if match:
         name = _clean_text(match.group(1))
-        if name not in {"해당", "담당", "외부", "내부"}:
+        if name.split()[0] not in {"해당", "담당", "외부", "내부"}:
             return name
     return ""
 
@@ -314,7 +318,9 @@ def _build_objective(question: str, values: Sequence[Any], fallback_no: int, qid
         scale_max=scale_max,
         scale_values=scale_values,
         scale_type="numeric" if all(isinstance(v, (int, float)) for v in values if _clean_text(v)) else "likert",
-        instructor_metric=_instructor_metric(cleaned_question) if instructor else "",
+        instructor_metric=_instructor_metric(cleaned_question) if (instructor or _extract_instructor_slot(cleaned_question)) else "",
+        summary_label="",
+        instructor_slot=_extract_instructor_slot(cleaned_question),
     )
 
 
@@ -359,6 +365,9 @@ def _build_subjective(question: str, values: Sequence[Any], fallback_no: int, qi
 
 
 def _classify_and_build(question: str, values: Sequence[Any], fallback_no: int, qid: str):
+    _, subjective_category = _classify_subjective(question)
+    if subjective_category != "subjective_other" or any(token in _clean_text(question) for token in ("작성해", "자유롭게", "의견을")):
+        return "subjective", _build_subjective(question, values, fallback_no, qid)
     scale_info = _infer_scale(values, question)
     if scale_info:
         return "objective", _build_objective(question, values, fallback_no, qid, scale_info)
@@ -399,6 +408,8 @@ def _parse_column_oriented(matrix: List[List[Any]], sheet_name: str):
         if not _is_question(question):
             continue
         values = [row[ci] if ci < len(row) else None for row in rows]
+        if not any(_clean_text(value) for value in values):
+            continue
         kind, item = _classify_and_build(question, values, qidx, f"{sheet_name}-c{ci+1}")
         if kind == "objective":
             objective.append(item)
@@ -423,6 +434,8 @@ def _parse_row_oriented(matrix: List[List[Any]], sheet_name: str):
         if not question or _is_metadata_header(question) or not _is_question(question):
             continue
         values = list(row[1:])
+        if not any(_clean_text(value) for value in values):
+            continue
         response_count = max(response_count, sum(1 for v in values if _clean_text(v)))
         kind, item = _classify_and_build(question, values, qidx, f"{sheet_name}-r{ri+1}")
         if kind == "objective":
@@ -446,6 +459,8 @@ def _sheet_candidate(matrix: List[List[Any]], sheet_name: str) -> Optional[Dict[
         objective, choices, subjective, count = _parse_column_oriented(matrix, sheet_name)
         orientation = "문항이 열 / 응답자가 행"
     quality = len(objective) * 6 + len(choices) * 4 + len(subjective) * 2 + min(count, 30)
+    if any(token in sheet_name.lower() for token in ("응답", "response", "로우")):
+        quality += 80
     return {
         "sheet_name": sheet_name,
         "orientation": orientation,
@@ -512,6 +527,208 @@ def _extract_metadata(texts: Iterable[str], filename: str) -> Dict[str, str]:
     return metadata
 
 
+
+def _sheet_key_values(workbook, sheet_name: str) -> Dict[str, Any]:
+    if sheet_name not in workbook.sheetnames:
+        return {}
+    worksheet = workbook[sheet_name]
+    result: Dict[str, Any] = {}
+    for row in worksheet.iter_rows(values_only=True):
+        if len(row) < 2:
+            continue
+        key = _clean_text(row[0])
+        if not key or key in {"항목", "입력 항목"} or key.startswith("▶"):
+            continue
+        result[key] = row[1]
+    return result
+
+
+def _parse_positive_int(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(float(value))
+        return parsed if parsed > 0 else None
+    except (TypeError, ValueError):
+        match = re.search(r"\d+", str(value))
+        return int(match.group()) if match else None
+
+
+def _extract_question_settings(workbook) -> Dict[str, Any]:
+    settings: Dict[str, Any] = {"common": {}, "instructors": {}, "subjective": {}}
+    if "문항설정" not in workbook.sheetnames:
+        return settings
+    worksheet = workbook["문항설정"]
+    for row in worksheet.iter_rows(min_row=1, values_only=True):
+        if len(row) < 4:
+            continue
+        try:
+            number = int(row[0])
+        except (TypeError, ValueError):
+            continue
+        kind = _clean_text(row[1])
+        section = _clean_text(row[2])
+        summary = _clean_text(row[3]).replace("\\n", "\n")
+        slot_match = re.search(r"강사\s*(10|[1-9])\s*만족도\s*([12])", section)
+        if slot_match:
+            settings["instructors"][(int(slot_match.group(1)), int(slot_match.group(2)))] = {
+                "section": section,
+                "summary": summary,
+                "kind": kind,
+                "number": number,
+            }
+            continue
+        if "좋았" in section:
+            settings["subjective"]["subjective_good"] = {"section": section, "number": number}
+        elif any(token in section for token in ("아쉬", "개선")):
+            settings["subjective"]["subjective_bad"] = {"section": section, "number": number}
+        elif number in {1, 2, 3, 4, 25}:
+            category = {1: "overall", 2: "recommendation", 3: "schedule", 4: "difficulty", 25: "operation"}[number]
+            settings["common"][category] = {"section": section, "summary": summary, "number": number}
+    return settings
+
+
+def _extract_template_config(workbook) -> Dict[str, Any]:
+    basic = _sheet_key_values(workbook, "기본정보")
+    # V2.3 simplified template keeps education overview fields in the same
+    # 기본정보 sheet. Older five-sheet workbooks remain compatible because
+    # values from 교육개요 are merged when that legacy sheet exists.
+    overview = dict(basic)
+    overview.update(_sheet_key_values(workbook, "교육개요"))
+    instructor_slots: List[str] = [
+        _clean_text(basic.get(f"강사{slot}", "")) for slot in range(1, 11)
+    ]
+    if not any(instructor_slots):
+        legacy = _clean_text(basic.get("강사명", ""))
+        if legacy:
+            instructor_slots[0] = legacy
+    has_slot_fields = any(re.fullmatch(r"강사(?:10|[1-9])", key) or key == "강사명" for key in basic)
+    return {
+        "basic": basic,
+        "overview": overview,
+        "instructor_slots": instructor_slots,
+        "instructors": [name for name in instructor_slots if name],
+        "use_instructor_slots": bool(has_slot_fields),
+        "question_settings": _extract_question_settings(workbook),
+    }
+
+
+def _replace_instructor_tokens(text: str, instructor_slots: Sequence[str]) -> str:
+    result = str(text or "")
+    for slot in range(1, 11):
+        name = instructor_slots[slot - 1] if slot <= len(instructor_slots) else ""
+        result = result.replace(f"{{강사{slot}}}", name)
+        result = re.sub(rf"강사\s*{slot}(?!\d)", name, result)
+    result = re.sub(r"[ \t]+", " ", result)
+    result = re.sub(r" *\n *", "\n", result)
+    return result.strip()
+
+
+def _assign_instructor_slots(questions: Sequence[ObjectiveQuestion]) -> None:
+    named_slots: Dict[str, int] = {}
+    next_slot = 1
+    generic_index = 0
+    for question in questions:
+        if question.instructor_slot:
+            next_slot = max(next_slot, question.instructor_slot + 1)
+            continue
+        if question.instructor_name:
+            if question.instructor_name not in named_slots:
+                named_slots[question.instructor_name] = next_slot
+                next_slot += 1
+            question.instructor_slot = named_slots[question.instructor_name]
+        elif question.category == "instructor_generic":
+            question.instructor_slot = generic_index // 2 + 1
+            generic_index += 1
+
+
+def _is_inactive_instructor_question(question_text: str, config: Dict[str, Any]) -> bool:
+    """Return True for template placeholder questions whose instructor slot is blank.
+
+    The manual-input template reserves rows for up to ten instructors. Rows for
+    unused slots must never become choice/subjective questions, even when a
+    workbook contains formulas, whitespace, or other placeholder values that
+    make the row appear non-empty to the generic question classifier.
+    """
+    if not config.get("use_instructor_slots"):
+        return False
+    slot = _extract_instructor_slot(question_text)
+    if not slot:
+        return False
+    instructor_slots: List[str] = list(config.get("instructor_slots", []))
+    return slot > len(instructor_slots) or not _clean_text(instructor_slots[slot - 1])
+
+
+def _filter_inactive_instructor_placeholders(
+    objective_questions: List[ObjectiveQuestion],
+    choice_questions: List[ChoiceQuestion],
+    subjective_questions: List[SubjectiveQuestion],
+    config: Dict[str, Any],
+) -> Tuple[List[ObjectiveQuestion], List[ChoiceQuestion], List[SubjectiveQuestion]]:
+    """Remove every parsed item belonging to an empty instructor slot."""
+    objective_questions = [
+        question for question in objective_questions
+        if not _is_inactive_instructor_question(question.question, config)
+    ]
+    choice_questions = [
+        question for question in choice_questions
+        if not _is_inactive_instructor_question(question.question, config)
+    ]
+    subjective_questions = [
+        question for question in subjective_questions
+        if not _is_inactive_instructor_question(question.question, config)
+    ]
+    return objective_questions, choice_questions, subjective_questions
+
+
+def _apply_template_config(
+    objective_questions: List[ObjectiveQuestion],
+    subjective_questions: List[SubjectiveQuestion],
+    config: Dict[str, Any],
+) -> Tuple[List[ObjectiveQuestion], List[SubjectiveQuestion], List[str]]:
+    instructor_slots: List[str] = list(config.get("instructor_slots", []))
+    instructors: List[str] = [name for name in instructor_slots if name]
+    use_instructor_slots = bool(config.get("use_instructor_slots"))
+    settings = config.get("question_settings", {})
+    _assign_instructor_slots(objective_questions)
+
+    filtered_objective: List[ObjectiveQuestion] = []
+    for question in objective_questions:
+        slot = int(question.instructor_slot or 0)
+        if slot:
+            # A configured workbook intentionally ignores empty instructor slots.
+            if use_instructor_slots:
+                display_name = instructor_slots[slot - 1] if slot <= len(instructor_slots) else ""
+                if not display_name:
+                    continue
+                old_name = question.instructor_name
+                question.question = _replace_instructor_tokens(question.question, instructor_slots)
+                if old_name and old_name != display_name:
+                    question.question = question.question.replace(old_name, display_name)
+                question.instructor_name = display_name
+                question.category = "instructor"
+            metric_index = 2 if question.instructor_metric == "전문성" else 1
+            setting = settings.get("instructors", {}).get((slot, metric_index))
+            if setting:
+                question.section_label = _replace_instructor_tokens(setting.get("section", ""), instructor_slots)
+                question.summary_label = _replace_instructor_tokens(setting.get("summary", ""), instructor_slots)
+        else:
+            setting = settings.get("common", {}).get(question.category)
+            if setting:
+                question.section_label = setting.get("section") or question.section_label
+                question.summary_label = setting.get("summary") or question.section_label
+        filtered_objective.append(question)
+
+    for question in subjective_questions:
+        setting = settings.get("subjective", {}).get(question.category)
+        if setting:
+            question.section_label = setting.get("section") or question.section_label
+
+    if not instructors:
+        instructors = _dedupe_instructors(filtered_objective)
+    return filtered_objective, subjective_questions, instructors
+
+
 def _dedupe_instructors(questions: Sequence[ObjectiveQuestion]) -> List[str]:
     found: List[str] = []
     seen = set()
@@ -560,8 +777,11 @@ def parse_excel(file_bytes: bytes, filename: str) -> ReportData:
     workbook = load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=False)
     candidates: List[Dict[str, Any]] = []
     diagnostics: List[str] = []
+    config = _extract_template_config(workbook)
 
     for worksheet in workbook.worksheets:
+        if worksheet.title in {"입력가이드", "기본정보", "교육개요", "문항설정"}:
+            continue
         candidate = _sheet_candidate(_sheet_matrix(worksheet), worksheet.title)
         if candidate:
             candidates.append(candidate)
@@ -572,40 +792,67 @@ def parse_excel(file_bytes: bytes, filename: str) -> ReportData:
             )
 
     if not candidates:
-        raise ValueError("설문 문항과 응답 구조를 찾지 못했습니다. 문항이 첫 행 또는 첫 열에 있는지 확인해 주세요.")
+        raise ValueError("설문응답 시트에서 문항과 응답 구조를 찾지 못했습니다. 첫 행에 문항, 아래 행에 응답이 있는지 확인해 주세요.")
 
     best = max(candidates, key=lambda item: item["quality"])
     metadata = _extract_metadata(_all_cell_texts(workbook), filename)
     objective_questions: List[ObjectiveQuestion] = best["objective"]
     choice_questions: List[ChoiceQuestion] = best["choices"]
     subjective_questions: List[SubjectiveQuestion] = best["subjective"]
-    instructors = _dedupe_instructors(objective_questions)
-    course_name = metadata["course_name"]
+
+    # The template includes placeholder rows for 강사1~강사10. Only slots with
+    # a name in 기본정보 are active. Filter all parsed question types before
+    # applying labels so unused rows cannot leak into 설문 구성 or 주관식 pages.
+    objective_questions, choice_questions, subjective_questions = _filter_inactive_instructor_placeholders(
+        objective_questions, choice_questions, subjective_questions, config
+    )
+    objective_questions, subjective_questions, instructors = _apply_template_config(
+        objective_questions, subjective_questions, config
+    )
+
+    basic = config.get("basic", {})
+    overview = config.get("overview", {})
+    course_name = _clean_text(basic.get("과정명")) or metadata["course_name"]
+    company_name = _clean_text(basic.get("고객사명")) or metadata["company_name"]
+    schedule = _clean_text(basic.get("교육일정")) or metadata["schedule"]
+    total_participants = _parse_positive_int(basic.get("수강인원"))
+    cover_top_label = _clean_text(basic.get("표지_상단라벨")) or "결과보고서"
+    cover_title1 = _clean_text(basic.get("표지_제목1")) or course_name
+    cover_title2 = _clean_text(basic.get("표지_제목2")) or "결과보고서"
 
     report = ReportData(
         source_filename=filename,
-        company_name=metadata["company_name"],
+        company_name=company_name,
         report_title=f"{course_name} 결과보고서" if course_name else "교육만족도 결과보고서",
         course_name=course_name,
         course_round=metadata["course_round"],
-        schedule=metadata["schedule"],
+        schedule=schedule,
+        delivery_method=_clean_text(overview.get("교육방식")),
+        target_text=_clean_text(overview.get("교육대상")),
+        total_participants=total_participants,
         response_count=best["response_count"],
+        objective=_clean_text(overview.get("교육목표")),
         instructors=instructors,
         objective_questions=objective_questions,
         choice_questions=choice_questions,
         subjective_questions=subjective_questions,
         diagnostics=diagnostics,
+        cover_top_label=cover_top_label,
+        cover_title1=cover_title1,
+        cover_title2=cover_title2,
     )
     report.insights = _build_insights(report)
 
     report.diagnostics.insert(0, f"분석에 사용한 시트: '{best['sheet_name']}'")
+    if config.get("instructors"):
+        report.diagnostics.append(f"기본정보에서 입력된 강사 {len(instructors)}명을 반영했습니다: {', '.join(instructors)}")
     scale_summary = Counter((q.scale_min, q.scale_max) for q in objective_questions)
     if scale_summary:
         report.diagnostics.append(
             "인식한 척도: " + ", ".join(f"{lo}~{hi}점 {count}문항" for (lo, hi), count in sorted(scale_summary.items()))
         )
-    if not metadata["schedule"]:
+    if not schedule:
         report.diagnostics.append("교육일정은 엑셀에서 찾지 못해 공란으로 두었습니다.")
     if not instructors:
-        report.diagnostics.append("실명 강사명은 문항에서 찾지 못했습니다. '(강사)' 같은 일반 표기는 강사명으로 저장하지 않습니다.")
+        report.diagnostics.append("강사명은 기본정보와 설문 문항에서 찾지 못했습니다.")
     return report

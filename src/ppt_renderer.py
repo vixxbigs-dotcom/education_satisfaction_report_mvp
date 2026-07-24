@@ -118,9 +118,8 @@ def _add_cover(prs, report):
     slide = prs.slides.add_slide(prs.slide_layouts[6]); _add_full_background(slide)
     if report.company_name:
         _add_text(slide, report.company_name, Inches(6.9), Inches(1.98), Inches(5.25), Inches(0.36), 12, False, MUTED)
-    label = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(6.88), Inches(2.48), Inches(1.42), Inches(0.38))
-    label.fill.solid(); label.fill.fore_color.rgb = DARK; label.line.fill.background()
-    _add_text(slide, report.cover_top_label or "결과보고서", Inches(6.90), Inches(2.49), Inches(1.38), Inches(0.34), 10.5, True, WHITE, PP_ALIGN.CENTER)
+    # 표지 우측의 진회색 "결과보고서" 배지는 웹 미리보기에는 없고
+    # 다운로드 PPT에만 남아 보였으므로 제거합니다.
     _add_text(slide, report.cover_title1 or report.course_name or "과정 이름", Inches(6.88), Inches(3.08), Inches(5.4), Inches(0.55), 29, True, ORANGE, valign=MSO_ANCHOR.BOTTOM)
     _add_text(slide, report.cover_title2 or "결과보고서", Inches(6.88), Inches(3.62), Inches(5.4), Inches(0.68), 31, True, ORANGE, valign=MSO_ANCHOR.TOP)
     if report.schedule:
@@ -193,11 +192,16 @@ def _add_survey_structure(prs, report, item):
 
 
 def _summary_label(q):
-    if q.summary_label:
-        return q.summary_label
-    if q.instructor_name:
-        return f"{q.instructor_name}\n{q.instructor_metric or '만족도'}"
-    return q.section_label
+    # Compatibility with reports parsed before ``summary_label`` was added
+    # to ObjectiveQuestion. Old session objects may not have the attribute.
+    custom_label = getattr(q, "summary_label", "")
+    if custom_label:
+        return custom_label
+    instructor_name = getattr(q, "instructor_name", "")
+    if instructor_name:
+        metric = getattr(q, "instructor_metric", "") or "만족도"
+        return f"{instructor_name}\n{metric}"
+    return getattr(q, "section_label", "만족도")
 
 
 def _count_axis(max_count):
@@ -428,8 +432,9 @@ def _add_single_choice(prs, q: ChoiceQuestion, order: int):
     _add_text(slide, text, Inches(.75), Inches(1.13), Inches(11.6), Inches(.65), _question_font_size(text), True, DARK, valign=MSO_ANCHOR.TOP)
     data = ChartData(); data.categories = q.options; data.add_series("응답", q.counts)
     chart = slide.shapes.add_chart(XL_CHART_TYPE.PIE, Inches(.85), Inches(1.9), Inches(5.3), Inches(4.65), data).chart
-    chart.has_legend = True; chart.legend.position = XL_LEGEND_POSITION.RIGHT; chart.legend.include_in_layout = False
-    chart.legend.font.name = _current_font(); chart.legend.font.size = Pt(10)
+    # 우측에 별도 범례(응답수·비율 포함)를 직접 그리므로
+    # PowerPoint 기본 범례는 끕니다. 켜두면 선택지 설명이 두 번 표시됩니다.
+    chart.has_legend = False
     series = chart.series[0]; series.has_data_labels = True; labels = series.data_labels; labels.show_percentage = True; labels.show_category_name = False; labels.position = XL_LABEL_POSITION.BEST_FIT; labels.font.name = _current_font(); labels.font.size = Pt(9)
     for idx, point in enumerate(series.points):
         point.format.fill.solid(); point.format.fill.fore_color.rgb = PALETTE[idx % len(PALETTE)]

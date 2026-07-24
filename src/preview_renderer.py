@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 from typing import List, Sequence
 
+from .font_manager import get_preview_font_css
 from .models import ChoiceQuestion, ObjectiveQuestion, ReportData
 from .slide_plan import SlideItem
 from .text_utils import strip_leading_question_numbers
@@ -20,6 +21,7 @@ LIGHT_GRID = "#E5E5E5"
 PALETTE = [ORANGE, PURPLE, BLUE, "#F39A66", "#7C8DB5", "#58A98C", "#C9A13B", "#9B9B9B", "#D87B9A", "#7B6FB0"]
 ASSET_DIR = Path(__file__).resolve().parent.parent / "assets"
 SUBJECTIVE_PER_SLIDE = 5
+FONT_FACE_CSS = get_preview_font_css()
 
 
 def _data_uri(filename: str) -> str:
@@ -62,11 +64,14 @@ def _section_background_content(title_html: str, extra_html: str = "") -> str:
 
 
 def _cover(report: ReportData) -> str:
-    course = report.course_name or "과정 이름"
+    title1 = report.cover_title1 or report.course_name or "과정 이름"
+    title2 = report.cover_title2 or "결과보고서"
+    top_label = report.cover_top_label or "결과보고서"
     company = f'<div class="section-company">{_e(report.company_name)}</div>' if report.company_name else ""
     schedule = f'<div class="section-schedule">{_e(report.schedule)}</div>' if report.schedule else ""
     return _section_background_content(
-        f'<div class="cover-course">{_e(course)}</div><div class="cover-report">결과보고서</div>',
+        f'<div class="cover-top-label">{_e(top_label)}</div>'
+        f'<div class="cover-course">{_e(title1)}</div><div class="cover-report">{_e(title2)}</div>',
         company + schedule,
     )
 
@@ -138,10 +143,16 @@ def _survey_structure(report: ReportData, slide: SlideItem) -> str:
 
 
 def _summary_label(q: ObjectiveQuestion) -> str:
-    if q.instructor_name:
-        metric = q.instructor_metric or "만족도"
-        return f"{q.instructor_name}<br/>{metric}"
-    return _e(q.section_label)
+    # Compatibility with reports parsed before ``summary_label`` was added
+    # to ObjectiveQuestion. Old session objects may not have the attribute.
+    custom_label = getattr(q, "summary_label", "")
+    if custom_label:
+        return _e(custom_label).replace("\n", "<br/>")
+    instructor_name = getattr(q, "instructor_name", "")
+    if instructor_name:
+        metric = getattr(q, "instructor_metric", "") or "만족도"
+        return f"{_e(instructor_name)}<br/>{_e(metric)}"
+    return _e(getattr(q, "section_label", "만족도"))
 
 
 def _count_axis(max_count: int) -> tuple[float, List[float]]:
@@ -381,9 +392,10 @@ def render_slide_html(report: ReportData, slide: SlideItem, photo_names: List[st
 
 PREVIEW_CSS = f"""
 <style>
+{FONT_FACE_CSS}
 :root{{--orange:{ORANGE};--orange-dark:{ORANGE_DARK};--dark:{DARK};--muted:{MUTED};--grid:{LIGHT_GRID};}}
 .ppt-stage{{width:100%;display:flex;justify-content:center;padding:10px;background:#e8e8e8;border-radius:12px;box-sizing:border-box;}}
-.ppt-slide{{position:relative;width:100%;aspect-ratio:16/9;background:#fff;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.16);font-family:'Malgun Gothic','Noto Sans KR',sans-serif;color:var(--dark);box-sizing:border-box;}}
+.ppt-slide{{position:relative;width:100%;aspect-ratio:16/9;background:#fff;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.16);font-family:'ReportAssetFont','Malgun Gothic','Noto Sans KR',sans-serif;color:var(--dark);box-sizing:border-box;}}
 .section-background{{background-image:url('{SECTION_BG_URI}');background-size:100% 100%;background-repeat:no-repeat;}}
 .section-right-title{{position:absolute;left:51.5%;top:35%;width:39%;color:var(--orange);font-weight:800;line-height:1.18;}}
 .cover-course{{font-size:clamp(21px,3vw,48px);word-break:keep-all;}}.cover-report{{font-size:clamp(24px,3.5vw,56px);}}
