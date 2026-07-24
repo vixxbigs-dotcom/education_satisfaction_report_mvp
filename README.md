@@ -1,4 +1,5 @@
 # 교육만족도 결과보고서 생성기 V2 (Beta)
+🌍https://educationsatisfactionreportmvp-tdhju6x2yaawphxhcmxg2b.streamlit.app/
 
 형식이 다른 설문 엑셀과 구글폼 응답 파일을 자동 분석하고, 장표별 내용을 웹에서 수정한 뒤 **편집 가능한 16:9 PPTX**를 생성하는 Streamlit 앱입니다.
 
